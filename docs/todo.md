@@ -6,18 +6,18 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 1 — Project Scaffold
 
-- [ ] Create `requirements.txt` with initial dependencies (`facebook-business`, `mcp`, `openpyxl`, `jsonschema`, `python-dotenv`, `anthropic`)
-- [ ] Create `.env.example` with required environment variables (`FB_APP_ID`, `FB_APP_SECRET`, `FB_ACCESS_TOKEN`, `FB_ACCOUNT_ID`, `ANTHROPIC_API_KEY`)
-- [ ] Create `.gitignore` (`.env`, `state/`, `__pycache__/`, `.pytest_cache/`)
-- [ ] Create top-level directory structure:
+- [x] Create `requirements.txt` with initial dependencies (`facebook-business`, `mcp`, `openpyxl`, `jsonschema`, `python-dotenv`, `anthropic`)
+- [x] Create `.env.example` with required environment variables (`FB_APP_ID`, `FB_APP_SECRET`, `FB_ACCESS_TOKEN`, `FB_ACCOUNT_ID`, `ANTHROPIC_API_KEY`)
+- [x] Create `.gitignore` (`.env`, `state/`, `__pycache__/`, `.pytest_cache/`)
+- [x] Create top-level directory structure:
   - `src/` — all source modules
   - `src/api/` — platform API clients
   - `src/services/` — business logic services
   - `campaigns/` — JSON campaign definition files (committed to repo)
   - `state/` — state files written by traffic.py (committed to repo, gitignored pattern for `.lock` files)
   - `tests/` — all test files
-- [ ] Create `src/__init__.py`, `src/api/__init__.py`, `src/services/__init__.py`
-- [ ] Update `README.md` with project overview, setup instructions, and usage examples
+- [x] Create `src/__init__.py`, `src/api/__init__.py`, `src/services/__init__.py`
+- [x] Update `README.md` with project overview, setup instructions, and usage examples
 
 ---
 

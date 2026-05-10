@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# State lock files (state JSON files are committed; lock files are not)
+state/*.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
