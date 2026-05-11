@@ -195,3 +195,18 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 - `src/api/google_ads.py` — Google Ads API client
 - `schemas/google_campaign.schema.json`
 - Multi-account batch operations
+
+---
+
+## Phase 11 — SaaS Multi-Tenancy
+
+See `docs/saas-architecture.md` for full design.
+
+- [ ] Define customer registry format (`customers.json` or env-based) — fields: `customer_id`, `account_ids`, `fb_access_token`, `fb_page_id`, `email_addresses`, `mcp_api_key`
+- [ ] Add API key authentication to MCP server — validate key on every request, resolve to customer record, scope all operations to `campaigns/{customer_slug}/{account_id}/`
+- [ ] Implement MCP tool: `save_campaign_file(customer_slug, account_id, filename, json_str)` — commit campaign JSON to repo via GitHub API
+- [ ] Implement MCP tool: `list_campaign_files(customer_slug, account_id)` — list existing JSON files in a customer's folder via GitHub API
+- [ ] Replace direct filesystem reads in existing MCP tools with GitHub API reads so tools work for non-repo agents
+- [ ] Implement `get_campaign_export(account_id)` — fetch full campaign hierarchy from Facebook (campaigns + ad sets + ads) for a given account; current `get_campaign_status` returns campaign-level only
+- [ ] Write onboarding script — takes customer config as input, creates folder in repo, registers customer record, issues API key
+- [ ] Write `tests/test_multitenancy.py` — test that API key scoping prevents cross-customer access, test GitHub API read/write round-trip

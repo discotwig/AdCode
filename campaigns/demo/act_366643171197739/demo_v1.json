@@ -1,5 +1,5 @@
 {
-  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "account_id": "act_366643171197739",
   "campaigns": [
     {
       "name": "AdCode Demo — Brand Awareness",
@@ -13,7 +13,6 @@
           "daily_budget": 1000,
           "billing_event": "LINK_CLICKS",
           "optimization_goal": "LINK_CLICKS",
-          "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
           "targeting": {
             "age_min": 25,
             "age_max": 44,
@@ -32,7 +31,7 @@
               "creative": {
                 "name": "Demo Creative v1",
                 "object_story_spec": {
-                  "page_id": "REPLACE_WITH_PAGE_ID",
+                  "page_id": "102066921653934",
                   "link_data": {
                     "message": "See what AdCode can do — campaigns defined in code, pushed with a single command.",
                     "link": "https://example.com/demo",

@@ -59,7 +59,7 @@ class MetaClient:
         merged = {"is_adset_budget_sharing_enabled": False, **params}
         result = _with_retry(self._account.create_campaign, fields=[], params=merged)
         campaign_id = result["id"]
-        logger.info("created campaign", extra={"fb_id": campaign_id, "name": params.get("name")})
+        logger.info("created campaign", extra={"fb_id": campaign_id, "entity_name": params.get("name")})
         return campaign_id
 
     def update_campaign(self, campaign_id: str, params: dict) -> None:

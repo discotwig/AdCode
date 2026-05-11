@@ -1,0 +1,29 @@
+{
+  "account_id": "act_366643171197739",
+  "campaigns": [
+    {
+      "name": "My campaign 1017",
+      "objective": "LINK_CLICKS",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "fb_id": "23848811639550718",
+      "ad_sets": []
+    },
+    {
+      "name": "Test API Campaign 1",
+      "objective": "PAGE_LIKES",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "fb_id": "23845817703660718",
+      "ad_sets": []
+    },
+    {
+      "name": "Atlanta Debut",
+      "objective": "REACH",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "fb_id": "23845815648120718",
+      "ad_sets": []
+    }
+  ]
+}

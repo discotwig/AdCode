@@ -1,0 +1,16 @@
+{
+  "account_id": "act_366643171197739",
+  "last_pushed_at": "2026-05-11T21:25:21.080590+00:00",
+  "campaigns": {
+    "AdCode Demo \u00e2\u20ac\u201d Brand Awareness": {
+      "fb_id": "120244516270680719",
+      "params": {
+        "name": "AdCode Demo \u00e2\u20ac\u201d Brand Awareness",
+        "objective": "OUTCOME_TRAFFIC",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {}
+    }
+  }
+}

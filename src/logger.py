@@ -14,7 +14,7 @@ class JsonFormatter(logging.Formatter):
         }
         # Merge structured extra fields (account_id, fb_id, operation, etc.)
         for key in ("account_id", "fb_id", "operation", "object_type", "campaign_id",
-                    "adset_id", "ad_id", "name"):
+                    "adset_id", "ad_id", "entity_name"):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)
 
