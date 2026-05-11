@@ -55,7 +55,9 @@ class MetaClient:
     # ------------------------------------------------------------------
 
     def create_campaign(self, params: dict) -> str:
-        result = _with_retry(self._account.create_campaign, fields=[], params=params)
+        # Required by the API when no campaign-level budget is set
+        merged = {"is_adset_budget_sharing_enabled": False, **params}
+        result = _with_retry(self._account.create_campaign, fields=[], params=merged)
         campaign_id = result["id"]
         logger.info("created campaign", extra={"fb_id": campaign_id, "name": params.get("name")})
         return campaign_id
@@ -68,6 +70,11 @@ class MetaClient:
     def pause_campaign(self, campaign_id: str) -> None:
         self.update_campaign(campaign_id, {"status": "PAUSED"})
         logger.info("paused campaign", extra={"fb_id": campaign_id})
+
+    def delete_campaign(self, campaign_id: str) -> None:
+        campaign = Campaign(campaign_id)
+        _with_retry(campaign.api_delete)
+        logger.info("deleted campaign", extra={"fb_id": campaign_id})
 
     def get_campaign(self, campaign_id: str) -> dict:
         campaign = Campaign(campaign_id)

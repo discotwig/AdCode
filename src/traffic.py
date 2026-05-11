@@ -19,7 +19,7 @@ with open(SCHEMA_PATH) as _f:
 # Fields compared when diffing state vs desired to decide create vs update
 _CAMPAIGN_DIFF_FIELDS = {"name", "objective", "status", "special_ad_categories", "spend_cap", "daily_budget"}
 _ADSET_DIFF_FIELDS = {"name", "status", "billing_event", "optimization_goal",
-                      "bid_amount", "daily_budget", "lifetime_budget", "start_time", "end_time"}
+                      "bid_amount", "bid_strategy", "daily_budget", "lifetime_budget", "start_time", "end_time"}
 _AD_DIFF_FIELDS = {"name", "status"}
 
 
@@ -119,7 +119,7 @@ def _campaign_api_params(campaign: dict) -> dict:
 
 def _adset_api_params(adset: dict) -> dict:
     keys = {"name", "status", "targeting", "billing_event", "optimization_goal",
-            "bid_amount", "daily_budget", "lifetime_budget", "start_time", "end_time"}
+            "bid_amount", "bid_strategy", "daily_budget", "lifetime_budget", "start_time", "end_time"}
     return {k: v for k, v in adset.items() if k in keys}
 
 
