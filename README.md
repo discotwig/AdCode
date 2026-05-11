@@ -141,12 +141,53 @@ configure_logging()
 
 ## Running tests
 
+### Unit tests (no credentials needed)
+
 ```bash
 pytest tests/
 ```
 
-Integration tests require a live Facebook sandbox account and are skipped when credentials are absent:
+168 tests, all local with mocks. Should pass out of the box.
+
+### Integration tests (Facebook sandbox)
+
+You need a Meta developer account with a test ad account:
+
+1. Go to [developers.facebook.com](https://developers.facebook.com), create an app with Marketing API access
+2. Create a System User in Business Manager, generate a token with `ads_management` permission
+3. Fill in `.env` with your credentials
+4. Run:
 
 ```bash
-FB_APP_ID=... FB_APP_SECRET=... FB_ACCESS_TOKEN=... FB_ACCOUNT_ID=... pytest tests/test_integration.py -v
+pytest tests/test_integration.py -v
+```
+
+Integration tests are skipped automatically when credentials are absent.
+
+### Manual smoke tests (CLI)
+
+Validate a campaign file against schema and AI policy checks:
+
+```bash
+python -c "
+import json, anthropic, os
+from dotenv import load_dotenv
+from src.services.validate import validate_all
+load_dotenv()
+data = json.load(open('campaigns/example.json'))
+result = validate_all(data, anthropic.Anthropic())
+print(result.summary())
+"
+```
+
+Dry-run the apply engine to see what would change without calling the API:
+
+```bash
+python src/traffic.py campaigns/example.json --dry-run
+```
+
+Ingest an Excel brief into campaign JSON:
+
+```bash
+python -m src.services.ingest my_brief.xlsx --output campaigns/output.json
 ```
