@@ -100,7 +100,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 6 — Drift Detection (`reconcile.py`)
 
-- [ ] Create `src/reconcile.py` — drift detection
+- [x] Create `src/reconcile.py` — drift detection
   - `fetch_actuals(account_id: str, client: MetaClient) -> dict` — pull all campaigns, adsets, and ads from Facebook for the account; normalize to the same shape as the state file
   - `diff_state(state: StateFile, actuals: dict) -> DriftReport` — compare state file to actuals; classify each difference as:
     - `MISSING_FROM_FACEBOOK` — in state file but not found in API (deleted externally?)
@@ -110,7 +110,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - `DriftReport` dataclass: list of `DriftItem` (object_type, name, fb_id, drift_type, expected, actual)
   - `format_report(drift_report: DriftReport) -> str` — human-readable text summary of the report
   - `main()` — CLI entry point: `python reconcile.py <account_id>`
-- [ ] Write `tests/test_reconcile.py`
+- [x] Write `tests/test_reconcile.py`
   - Test `diff_state()` correctly identifies each drift type
   - Test `diff_state()` returns empty report when state matches actuals
   - Test `format_report()` produces non-empty string for a non-empty report
