@@ -81,10 +81,65 @@ The structure mirrors Facebook's object hierarchy: campaign → ad set → ad �
 
 If you have an Excel brief, use the `validate_campaigns` tool with an Excel path and the AI will extract campaign definitions against the schema, flag ambiguities, and return JSON ready for review. Commit the JSON after reviewing ambiguities — do not re-ingest from Excel after the JSON is committed.
 
+## Connecting Gemini (or any MCP-compatible model)
+
+The MCP server speaks the [Model Context Protocol](https://modelcontextprotocol.io/) over stdio. Any MCP-compatible model can connect to it.
+
+**Gemini (Google AI Studio / Vertex AI)**
+
+1. Start the server in a terminal:
+   ```bash
+   python src/mcp_server.py
+   ```
+2. In your Gemini configuration, add an MCP server entry pointing to that process. The exact config format depends on your Gemini client, but the pattern is:
+   ```json
+   {
+     "mcpServers": {
+       "adcode": {
+         "command": "python",
+         "args": ["src/mcp_server.py"],
+         "cwd": "/path/to/AdCode"
+       }
+     }
+   }
+   ```
+3. Gemini will discover the tools automatically. You can now issue natural language instructions like:
+   - *"Validate campaigns/my_account.json and tell me if there are any policy issues."*
+   - *"Push campaigns/q3_launch.json to Facebook."*
+   - *"Show me the drift report for act_123456789."*
+
+**Claude Code (via MCP settings)**
+
+Add to your `~/.claude/settings.json`:
+```json
+{
+  "mcpServers": {
+    "adcode": {
+      "command": "python",
+      "args": ["src/mcp_server.py"],
+      "cwd": "/path/to/AdCode"
+    }
+  }
+}
+```
+
+## Logging
+
+The server logs structured JSON to stdout. Each log line includes `ts`, `level`, `logger`, `message`, and context fields like `fb_id`, `account_id`, and `name` where applicable.
+
+To enable JSON logging in scripts, call `configure_logging()` at startup:
+```python
+from src.logger import configure_logging
+configure_logging()
+```
+
 ## Running tests
 
 ```bash
 pytest tests/
 ```
 
-Integration tests (Phase 10) require a live Facebook sandbox account and will be skipped if credentials are not set.
+Integration tests require a live Facebook sandbox account and are skipped when credentials are absent:
+```bash
+FB_APP_ID=... FB_APP_SECRET=... FB_ACCESS_TOKEN=... FB_ACCOUNT_ID=... pytest tests/test_integration.py -v
+```

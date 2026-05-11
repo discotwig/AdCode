@@ -177,15 +177,15 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 10 — Integration & Hardening
 
-- [ ] Write `tests/test_integration.py` — end-to-end tests against the Facebook Marketing API sandbox account
+- [x] Write `tests/test_integration.py` — end-to-end tests against the Facebook Marketing API sandbox account
   - Create a campaign, verify state file is written, verify actuals match state
   - Update a field, verify idempotent re-push produces an update not a create
   - Introduce manual drift (update directly via SDK), verify `get_drift_report` detects it
   - Pause a campaign, verify status in state file and actuals
-- [ ] Add retry logic with exponential backoff to `MetaClient` for rate limit errors (`#32`, `#17`, `#4`)
-- [ ] Add structured logging throughout (`src/logger.py`) — log to stdout as JSON for easy parsing; include `account_id`, `operation`, `object_type`, `fb_id` in every log line where applicable
-- [ ] Validate that all `state/` writes are atomic (write to `.tmp` then rename) to prevent corrupt state files on interrupt
-- [ ] Document MCP server setup in `README.md` — how to connect Gemini to the MCP server
+- [x] Add retry logic with exponential backoff to `MetaClient` for rate limit errors (`#32`, `#17`, `#4`)
+- [x] Add structured logging throughout (`src/logger.py`) — log to stdout as JSON for easy parsing; include `account_id`, `operation`, `object_type`, `fb_id` in every log line where applicable
+- [x] Validate that all `state/` writes are atomic (write to `.tmp` then rename) to prevent corrupt state files on interrupt
+- [x] Document MCP server setup in `README.md` — how to connect Gemini to the MCP server
 
 ---
 

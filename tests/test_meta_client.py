@@ -193,20 +193,23 @@ class TestCreatives:
 
 
 class TestErrorPropagation:
-    def test_facebook_api_error_propagates(self, client, mocker):
+    def test_non_retryable_error_propagates_immediately(self, client, mocker):
         error = FacebookRequestError(
-            message="User request limit reached",
+            message="Invalid parameter",
             request_context={},
             http_status=400,
             http_headers={},
-            body={"error": {"code": 32, "message": "User request limit reached"}},
+            body={"error": {"code": 100, "message": "Invalid parameter"}},
         )
         client._account.create_campaign.side_effect = error
 
         with pytest.raises(FacebookRequestError):
             client.create_campaign({"name": "Test"})
 
-    def test_update_campaign_error_propagates(self, client, mocker):
+        # Should only be called once — no retries for non-retryable codes
+        client._account.create_campaign.assert_called_once()
+
+    def test_update_campaign_non_retryable_error_propagates(self, client, mocker):
         mock_campaign = MagicMock()
         mock_campaign.api_update.side_effect = FacebookRequestError(
             message="Invalid parameter",
@@ -219,3 +222,65 @@ class TestErrorPropagation:
 
         with pytest.raises(FacebookRequestError):
             client.update_campaign("camp_001", {"invalid_field": "value"})
+
+
+class TestRetryLogic:
+    def _rate_limit_error(self, code: int = 32) -> FacebookRequestError:
+        return FacebookRequestError(
+            message="Rate limit",
+            request_context={},
+            http_status=400,
+            http_headers={},
+            body={"error": {"code": code, "message": "Rate limit"}},
+        )
+
+    def test_retries_on_code_32(self, client, mocker):
+        mocker.patch("src.api.meta.time.sleep")
+        mock_result = MagicMock()
+        mock_result.__getitem__ = lambda self, key: "camp_001" if key == "id" else None
+        client._account.create_campaign.side_effect = [
+            self._rate_limit_error(32),
+            mock_result,
+        ]
+
+        camp_id = client.create_campaign({"name": "Test"})
+
+        assert camp_id == "camp_001"
+        assert client._account.create_campaign.call_count == 2
+
+    def test_retries_on_code_17(self, client, mocker):
+        mocker.patch("src.api.meta.time.sleep")
+        mock_result = MagicMock()
+        mock_result.__getitem__ = lambda self, key: "camp_001" if key == "id" else None
+        client._account.create_campaign.side_effect = [
+            self._rate_limit_error(17),
+            mock_result,
+        ]
+
+        camp_id = client.create_campaign({"name": "Test"})
+
+        assert camp_id == "camp_001"
+        assert client._account.create_campaign.call_count == 2
+
+    def test_raises_after_max_retries_exhausted(self, client, mocker):
+        mocker.patch("src.api.meta.time.sleep")
+        client._account.create_campaign.side_effect = self._rate_limit_error(32)
+
+        with pytest.raises(FacebookRequestError):
+            client.create_campaign({"name": "Test"})
+
+        assert client._account.create_campaign.call_count == 4  # _MAX_RETRIES
+
+    def test_sleeps_between_retries(self, client, mocker):
+        sleep_mock = mocker.patch("src.api.meta.time.sleep")
+        mock_result = MagicMock()
+        mock_result.__getitem__ = lambda self, key: "camp_001" if key == "id" else None
+        client._account.create_campaign.side_effect = [
+            self._rate_limit_error(32),
+            self._rate_limit_error(32),
+            mock_result,
+        ]
+
+        client.create_campaign({"name": "Test"})
+
+        assert sleep_mock.call_count == 2
