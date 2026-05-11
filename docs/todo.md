@@ -119,14 +119,14 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 7 — Validation Service
 
-- [ ] Create `src/services/validate.py` — campaign JSON validation
+- [x] Create `src/services/validate.py` — campaign JSON validation
   - `validate_schema(campaign_json: dict) -> list[ValidationError]` — run JSON Schema validation; return structured errors
   - `validate_policy(campaign_json: dict, ai_client) -> list[PolicyWarning]` — call Claude API with the campaign JSON and a policy-checking prompt; parse response into `PolicyWarning` objects
   - `PolicyWarning` dataclass: `severity` (ERROR | WARNING | INFO), `field`, `message`, `suggestion`
   - `validate_all(campaign_json: dict, ai_client) -> ValidationResult` — run both schema and policy checks; return combined result
   - `ValidationResult` dataclass: `schema_errors: list`, `policy_warnings: list`, `is_pushable: bool` (False if any schema errors or ERROR-severity policy warnings)
   - Policy prompt: covers prohibited content categories, Special Ad Category triggers, copy patterns that frequently cause rejection, missing landing page fields
-- [ ] Write `tests/test_validate.py`
+- [x] Write `tests/test_validate.py`
   - Test schema validation catches missing required fields
   - Test schema validation passes for valid example.json
   - Test policy validation with mocked Claude API response
