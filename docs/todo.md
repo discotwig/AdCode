@@ -152,47 +152,20 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 9 — MCP Server
 
-- [ ] Create `src/mcp_server.py` — MCP server entry point
+- [x] Create `src/mcp_server.py` — MCP server entry point
   - Initialize `MetaClient`, `StateFile`, AI client from environment variables at startup
   - Register all tools (see below)
   - `main()` — start the MCP server on stdio transport
 
-- [ ] Implement MCP tool: `push_campaigns`
-  - Input: `json_path: str` (path to campaign JSON file in the repo) or `json_str: str` (inline JSON)
-  - Steps: load JSON → validate schema → validate policy → preview diff → (if no blocking errors) apply → return `ApplyResult` as structured text
-  - Returns: summary of operations performed, any errors, link to updated state file
+- [x] Implement MCP tool: `push_campaigns`
+- [x] Implement MCP tool: `pause_campaigns`
+- [x] Implement MCP tool: `get_campaign_json`
+- [x] Implement MCP tool: `get_campaign_status`
+- [x] Implement MCP tool: `get_drift_report`
+- [x] Implement MCP tool: `validate_campaigns`
+- [x] Implement MCP tool: `preview_diff`
 
-- [ ] Implement MCP tool: `pause_campaigns`
-  - Input: `filter: dict` — one or more of `campaign_id`, `campaign_name`, `account_id`
-  - Steps: resolve campaigns matching filter from state file → call `pause_campaign` for each → update state file
-  - Returns: list of paused campaigns with IDs
-
-- [ ] Implement MCP tool: `get_campaign_json`
-  - Input: `filter: dict` — optional, one or more of `campaign_name`, `account_id`
-  - Steps: load state file(s) → filter to matching campaigns → return raw JSON
-  - Read-only; never calls Facebook API
-
-- [ ] Implement MCP tool: `get_campaign_status`
-  - Input: `campaign_id: str`
-  - Steps: call `MetaClient.get_campaign()` → return status, delivery, spend fields
-  - Returns live data from Facebook, not from state file
-
-- [ ] Implement MCP tool: `get_drift_report`
-  - Input: `account_id: str`
-  - Steps: load state file → fetch actuals → run `diff_state()` → format report
-  - Returns formatted drift report text
-
-- [ ] Implement MCP tool: `validate_campaigns`
-  - Input: `json_path: str` or `json_str: str`
-  - Steps: run schema validation → run AI policy validation
-  - Returns `ValidationResult` as structured text; does not push
-
-- [ ] Implement MCP tool: `preview_diff`
-  - Input: `json_path: str` or `json_str: str`
-  - Steps: load JSON → load state file → call `plan()` → format plan as human-readable diff
-  - Read-only; does not push
-
-- [ ] Write `tests/test_mcp_server.py`
+- [x] Write `tests/test_mcp_server.py`
   - Test each tool is registered and callable
   - Test `push_campaigns` calls validate then apply in order
   - Test `push_campaigns` aborts push when `is_pushable` is False
