@@ -38,7 +38,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 3 — Facebook API Client
 
-- [ ] Create `src/api/meta.py` — Facebook Marketing API client
+- [x] Create `src/api/meta.py` — Facebook Marketing API client
   - `MetaClient.__init__(app_id, app_secret, access_token, account_id)` — initialize SDK, store account reference
   - `MetaClient.create_campaign(params: dict) -> str` — returns campaign ID
   - `MetaClient.update_campaign(campaign_id: str, params: dict) -> None`
@@ -55,7 +55,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - `MetaClient.list_ads(adset_id: str) -> list[dict]`
   - `MetaClient.create_creative(params: dict) -> str`
   - Rate limit: surface `x-fb-ads-insights-throttle` header in a logged warning; raise on `(#32) Page request limit reached`
-- [ ] Write `tests/test_meta_client.py` — unit tests using mocked `facebook_business` SDK responses
+- [x] Write `tests/test_meta_client.py` — unit tests using mocked `facebook_business` SDK responses
   - Test create/update/get for each object type
   - Test rate limit warning path
   - Test API error propagation
