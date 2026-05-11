@@ -1,7 +1,13 @@
 import json
 import logging
 import os
+import sys
 from pathlib import Path
+
+# Running `python src/mcp_server.py` puts `src/` on sys.path, not the repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import anthropic
 from dotenv import load_dotenv
