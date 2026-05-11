@@ -136,14 +136,14 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 8 — Excel Ingestion Service
 
-- [ ] Create `src/services/ingest.py` — Excel → JSON ingestion
+- [x] Create `src/services/ingest.py` — Excel → JSON ingestion
   - `read_excel(path: str) -> dict` — read all sheets from an Excel file using `openpyxl`; return raw structure (sheet names, headers, rows) as a dict for passing to AI
   - `extract_campaigns(excel_data: dict, ai_client) -> IngestionResult` — call Claude API with the raw Excel structure and the campaign JSON schema; ask it to extract campaign definitions and flag ambiguities
   - `IngestionResult` dataclass: `campaigns: list[dict]` (extracted campaign JSONs), `ambiguities: list[Ambiguity]`, `confidence: float`
   - `Ambiguity` dataclass: `field`, `sheet`, `cell_ref`, `raw_value`, `question` (what the AI is unsure about)
   - `format_ambiguity_report(result: IngestionResult) -> str` — human-readable list of ambiguities for review
   - `main()` — CLI entry point: `python -m src.services.ingest <excel_file.xlsx> --output <output.json>`
-- [ ] Write `tests/test_ingest.py`
+- [x] Write `tests/test_ingest.py`
   - Test `read_excel()` with a fixture Excel file
   - Test `extract_campaigns()` with a mocked Claude API response
   - Test `format_ambiguity_report()` produces readable output for non-empty ambiguities
