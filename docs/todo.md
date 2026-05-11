@@ -64,7 +64,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 4 — State File Service
 
-- [ ] Create `src/services/state.py` — state file read/write
+- [x] Create `src/services/state.py` — state file read/write
   - `StateFile.load(account_id: str) -> StateFile` — reads `state/{account_id}.json`, returns empty state if not found
   - `StateFile.save(account_id: str) -> None` — writes state to `state/{account_id}.json`
   - `StateFile.get_campaign_id(campaign_name: str) -> str | None`
@@ -73,7 +73,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - `StateFile.upsert_campaign(campaign_name: str, fb_id: str, params: dict) -> None`
   - `StateFile.upsert_adset(...)`, `StateFile.upsert_ad(...)`
   - `StateFile.to_dict() -> dict` — serializable form for JSON write
-- [ ] Write `tests/test_state.py` — test load/save round-trip, upsert, and missing-key lookups
+- [x] Write `tests/test_state.py` — test load/save round-trip, upsert, and missing-key lookups
 
 ---
 
