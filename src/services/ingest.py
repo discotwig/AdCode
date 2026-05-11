@@ -6,6 +6,8 @@ from pathlib import Path
 
 import openpyxl
 
+from src.prompts import EXCEL_INGEST
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).parent.parent.parent / "schemas" / "campaign.schema.json"
@@ -47,44 +49,12 @@ def read_excel(path: str) -> dict:
     return result
 
 
-_INGEST_PROMPT = """\
-You are an ad trafficking assistant. Your job is to extract Facebook ad campaign definitions
-from an Excel file and convert them into structured JSON matching the schema below.
-
-The Excel file is non-standard and may have merged cells, colour-coded rows, multi-sheet layouts,
-or non-standard column names. Use your best judgement to interpret the content.
-
-Campaign JSON schema (required fields only, refer to this for structure):
-{schema}
-
-Excel file contents:
-{excel_data}
-
-Instructions:
-1. Extract all distinct ad campaigns you can identify.
-2. For each campaign, create a complete JSON object matching the schema.
-3. Use "PAUSED" as the default status for all objects unless the Excel clearly indicates otherwise.
-4. If a required field is ambiguous or missing, use your best guess and record it as an ambiguity.
-5. The account_id should be taken from the Excel if present; otherwise use "act_000000000".
-
-Respond with a JSON object with two keys:
-- "campaigns": array of campaign JSON objects matching the schema structure (just the array of campaign objects, not the top-level wrapper)
-- "ambiguities": array of ambiguity objects, each with:
-  - "field": the JSON path of the ambiguous field
-  - "sheet": the Excel sheet name where the issue was found
-  - "cell_ref": the cell reference (e.g. "B5") if identifiable, otherwise ""
-  - "raw_value": the raw value from Excel that was ambiguous
-  - "question": what you are unsure about and what human review should verify
-- "confidence": a float from 0.0 to 1.0 representing your overall confidence in the extraction
-
-Return only the JSON object, no other text."""
-
 
 def extract_campaigns(excel_data: dict, ai_client) -> IngestionResult:
     with open(SCHEMA_PATH) as f:
         schema = json.load(f)
 
-    prompt = _INGEST_PROMPT.format(
+    prompt = EXCEL_INGEST.format(
         schema=json.dumps(schema, indent=2),
         excel_data=json.dumps(excel_data, indent=2, default=str),
     )

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import jsonschema
 
+from src.prompts import POLICY_REVIEW
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).parent.parent.parent / "schemas" / "campaign.schema.json"
@@ -63,33 +65,6 @@ class ValidationResult:
         return "\n".join(lines)
 
 
-_POLICY_PROMPT = """\
-You are a Facebook Ads policy reviewer. Review the following campaign JSON and identify any content
-that may violate Facebook's advertising policies or be likely to cause ad rejection.
-
-Check for:
-1. Prohibited content categories: financial products with misleading claims, health/medical claims,
-   adult content, political content, gambling, weapons, drugs, or tobacco.
-2. Special Ad Category triggers: employment, housing, credit, or political content that requires
-   declaring a Special Ad Category but has an empty special_ad_categories array.
-3. Copy patterns that frequently cause rejection: superlative claims ("best", "#1", "guaranteed"),
-   before/after language, personal attribute targeting implications, clickbait.
-4. Landing page issues: URLs that appear to lead to prohibited content or are clearly placeholder values.
-5. Missing or placeholder fields: page_id set to "REPLACE_WITH_PAGE_ID", account_id "act_000000000".
-
-Respond with a JSON array of policy warnings. Each warning must have these fields:
-- severity: "ERROR" (likely rejection), "WARNING" (possible rejection), or "INFO" (note)
-- field: the JSON path to the problematic field (e.g. "campaigns[0].ad_sets[0].ads[0].creative.object_story_spec.link_data.message")
-- message: a concise description of the issue
-- suggestion: what to change to fix it
-
-If there are no issues, return an empty array [].
-
-Campaign JSON:
-{campaign_json}
-
-Return only the JSON array, no other text."""
-
 
 def validate_schema(campaign_json: dict) -> list[ValidationError]:
     validator = jsonschema.Draft7Validator(_CAMPAIGN_SCHEMA)
@@ -101,7 +76,7 @@ def validate_schema(campaign_json: dict) -> list[ValidationError]:
 
 
 def validate_policy(campaign_json: dict, ai_client) -> list[PolicyWarning]:
-    prompt = _POLICY_PROMPT.format(campaign_json=json.dumps(campaign_json, indent=2))
+    prompt = POLICY_REVIEW.format(campaign_json=json.dumps(campaign_json, indent=2))
 
     response = ai_client.messages.create(
         model="claude-sonnet-4-6",
