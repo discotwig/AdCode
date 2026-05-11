@@ -15,7 +15,7 @@ The core scripts are exposed as MCP tools. Connect your model (Gemini, Claude, e
 
 ## Setup
 
-**1. Clone and install dependencies**
+### 1. Clone and install dependencies
 
 ```bash
 git clone <repo>
@@ -23,7 +23,7 @@ cd AdCode
 pip install -r requirements.txt
 ```
 
-**2. Configure environment**
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
@@ -32,7 +32,7 @@ cp .env.example .env
 
 Facebook credentials: create a System User in your Meta Business Manager, grant it access to the ad account, and generate a token with `ads_management` permission.
 
-**3. Start the MCP server**
+### 3. Start the MCP server
 
 ```bash
 python src/mcp_server.py
@@ -43,7 +43,7 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 ## MCP Tools
 
 | Tool | Description |
-|---|---|
+| --- | --- |
 | `push_campaigns(json_path)` | Validate, diff, and apply a campaign JSON file to Facebook |
 | `pause_campaigns(filter)` | Pause campaigns matching a name or account filter |
 | `get_campaign_json(filter?)` | Return raw state file JSON for inspection — read-only, no API calls |
@@ -54,7 +54,7 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 
 ## Repository layout
 
-```
+```text
 campaigns/          JSON campaign definitions (source of truth)
 state/              State files written after push (campaign → Facebook ID mapping)
 src/
@@ -85,13 +85,16 @@ If you have an Excel brief, use the `validate_campaigns` tool with an Excel path
 
 The MCP server speaks the [Model Context Protocol](https://modelcontextprotocol.io/) over stdio. Any MCP-compatible model can connect to it.
 
-**Gemini (Google AI Studio / Vertex AI)**
+### Gemini (Google AI Studio / Vertex AI)
 
 1. Start the server in a terminal:
+
    ```bash
    python src/mcp_server.py
    ```
+
 2. In your Gemini configuration, add an MCP server entry pointing to that process. The exact config format depends on your Gemini client, but the pattern is:
+
    ```json
    {
      "mcpServers": {
@@ -103,14 +106,16 @@ The MCP server speaks the [Model Context Protocol](https://modelcontextprotocol.
      }
    }
    ```
+
 3. Gemini will discover the tools automatically. You can now issue natural language instructions like:
    - *"Validate campaigns/my_account.json and tell me if there are any policy issues."*
    - *"Push campaigns/q3_launch.json to Facebook."*
    - *"Show me the drift report for act_123456789."*
 
-**Claude Code (via MCP settings)**
+### Claude Code (via MCP settings)
 
 Add to your `~/.claude/settings.json`:
+
 ```json
 {
   "mcpServers": {
@@ -128,6 +133,7 @@ Add to your `~/.claude/settings.json`:
 The server logs structured JSON to stdout. Each log line includes `ts`, `level`, `logger`, `message`, and context fields like `fb_id`, `account_id`, and `name` where applicable.
 
 To enable JSON logging in scripts, call `configure_logging()` at startup:
+
 ```python
 from src.logger import configure_logging
 configure_logging()
@@ -140,6 +146,7 @@ pytest tests/
 ```
 
 Integration tests require a live Facebook sandbox account and are skipped when credentials are absent:
+
 ```bash
 FB_APP_ID=... FB_APP_SECRET=... FB_ACCESS_TOKEN=... FB_ACCOUNT_ID=... pytest tests/test_integration.py -v
 ```
