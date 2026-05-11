@@ -79,7 +79,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 5 — Apply Engine (`traffic.py`)
 
-- [ ] Create `src/traffic.py` — the apply engine
+- [x] Create `src/traffic.py` — the apply engine
   - `load_campaign_json(path: str) -> dict` — read and schema-validate a campaign JSON file
   - `plan(campaign_json: dict, state: StateFile, client: MetaClient) -> Plan` — compute create/update/noop diff without making API calls; returns a `Plan` object listing operations
   - `apply(plan: Plan, client: MetaClient, state: StateFile) -> ApplyResult` — execute operations in order (campaigns first, then adsets, then ads); write state file after each successful create
@@ -88,7 +88,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - On failure of any individual operation: log the error, continue with remaining operations, report all failures in result (do not abort entire run)
   - `main()` — CLI entry point: `python traffic.py <campaign_file.json> [--dry-run]`
     - `--dry-run` runs `plan()` only and prints the plan without calling `apply()`
-- [ ] Write `tests/test_traffic.py`
+- [x] Write `tests/test_traffic.py`
   - Test `plan()` produces correct operations for a new campaign (all creates)
   - Test `plan()` produces correct operations when state file exists (updates where fields differ, noops where identical)
   - Test `apply()` calls API methods in correct order
