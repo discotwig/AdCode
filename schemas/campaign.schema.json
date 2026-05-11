@@ -1,0 +1,315 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://adcode/schemas/campaign.schema.json",
+  "title": "AdCode Campaign Definition",
+  "description": "Defines one or more Facebook ad campaigns for a single ad account.",
+  "type": "object",
+  "required": ["account_id", "campaigns"],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "description": "Facebook ad account ID in act_XXXXXXXXX format.",
+      "pattern": "^act_[0-9]+$"
+    },
+    "campaigns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/campaign" }
+    }
+  },
+  "definitions": {
+    "campaign": {
+      "type": "object",
+      "required": ["name", "objective", "status", "special_ad_categories", "ad_sets"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "objective": {
+          "type": "string",
+          "description": "Immutable after creation.",
+          "enum": [
+            "OUTCOME_TRAFFIC",
+            "OUTCOME_AWARENESS",
+            "OUTCOME_ENGAGEMENT",
+            "OUTCOME_LEADS",
+            "OUTCOME_SALES",
+            "OUTCOME_APP_PROMOTION"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "PAUSED"]
+        },
+        "special_ad_categories": {
+          "type": "array",
+          "description": "Required by Facebook even when empty. Use [] if no special categories apply.",
+          "items": {
+            "type": "string",
+            "enum": ["EMPLOYMENT", "HOUSING", "CREDIT", "ISSUES_ELECTIONS_POLITICS", "ONLINE_GAMBLING_AND_GAMING"]
+          }
+        },
+        "spend_cap": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Lifetime spend cap in account currency cents. Optional."
+        },
+        "daily_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Campaign-level daily budget in cents for Campaign Budget Optimization. Optional."
+        },
+        "ad_sets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/ad_set" }
+        }
+      }
+    },
+    "ad_set": {
+      "type": "object",
+      "required": ["name", "status", "targeting", "billing_event", "optimization_goal", "ads"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "PAUSED"]
+        },
+        "targeting": { "$ref": "#/definitions/targeting" },
+        "billing_event": {
+          "type": "string",
+          "enum": ["IMPRESSIONS", "LINK_CLICKS", "PAGE_LIKES", "POST_ENGAGEMENT", "VIDEO_VIEWS", "THRUPLAY", "PURCHASE", "APP_INSTALLS"]
+        },
+        "optimization_goal": {
+          "type": "string",
+          "enum": ["IMPRESSIONS", "REACH", "LINK_CLICKS", "LANDING_PAGE_VIEWS", "LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "VALUE", "APP_INSTALLS", "PAGE_ENGAGEMENT", "THRUPLAY", "CONVERSATIONS"]
+        },
+        "bid_amount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Manual bid cap in account currency cents. Omit for automatic bidding."
+        },
+        "daily_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Ad set daily budget in cents. Use this or lifetime_budget, not both."
+        },
+        "lifetime_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Ad set lifetime budget in cents. Requires start_time and end_time."
+        },
+        "start_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601. Required when using lifetime_budget."
+        },
+        "end_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601. Required when using lifetime_budget."
+        },
+        "ads": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/ad" }
+        }
+      }
+    },
+    "targeting": {
+      "type": "object",
+      "required": ["geo_locations"],
+      "additionalProperties": true,
+      "properties": {
+        "geo_locations": {
+          "type": "object",
+          "description": "At least one of countries, regions, or cities is required by Facebook.",
+          "additionalProperties": true,
+          "properties": {
+            "countries": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 2, "maxLength": 2 },
+              "description": "ISO 3166-1 alpha-2 country codes."
+            },
+            "regions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key"],
+                "properties": {
+                  "key": { "type": "string" }
+                }
+              }
+            },
+            "cities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key"],
+                "properties": {
+                  "key": { "type": "string" },
+                  "radius": { "type": "integer" },
+                  "distance_unit": { "type": "string", "enum": ["mile", "kilometer"] }
+                }
+              }
+            }
+          }
+        },
+        "age_min": {
+          "type": "integer",
+          "minimum": 18,
+          "maximum": 65
+        },
+        "age_max": {
+          "type": "integer",
+          "minimum": 18,
+          "maximum": 65
+        },
+        "genders": {
+          "type": "array",
+          "items": { "type": "integer", "enum": [1, 2] },
+          "description": "1 = male, 2 = female. Omit for all genders."
+        },
+        "interests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "publisher_platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["facebook", "instagram", "audience_network", "messenger"]
+          }
+        },
+        "custom_audiences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" }
+            }
+          }
+        },
+        "excluded_custom_audiences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "ad": {
+      "type": "object",
+      "required": ["name", "status", "creative"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "PAUSED"]
+        },
+        "creative": { "$ref": "#/definitions/creative" }
+      }
+    },
+    "creative": {
+      "type": "object",
+      "required": ["name", "object_story_spec"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "object_story_spec": { "$ref": "#/definitions/object_story_spec" }
+      }
+    },
+    "object_story_spec": {
+      "type": "object",
+      "required": ["page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "description": "Facebook Page ID that will be associated with the ad."
+        },
+        "link_data": { "$ref": "#/definitions/link_data" },
+        "video_data": { "$ref": "#/definitions/video_data" }
+      }
+    },
+    "link_data": {
+      "type": "object",
+      "required": ["message", "link"],
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Primary ad copy (body text)."
+        },
+        "link": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "Destination URL. Must be an absolute http or https URL."
+        },
+        "name": {
+          "type": "string",
+          "description": "Headline."
+        },
+        "description": {
+          "type": "string",
+          "description": "Link description shown below the headline."
+        },
+        "image_hash": {
+          "type": "string",
+          "description": "Hash of an image uploaded to the ad account's image library."
+        },
+        "call_to_action": { "$ref": "#/definitions/call_to_action" }
+      }
+    },
+    "video_data": {
+      "type": "object",
+      "required": ["video_id", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "video_id": { "type": "string" },
+        "message": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "image_url": { "type": "string", "pattern": "^https?://" },
+        "call_to_action": { "$ref": "#/definitions/call_to_action" }
+      }
+    },
+    "call_to_action": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "SHOP_NOW", "LEARN_MORE", "SIGN_UP", "DOWNLOAD", "CONTACT_US",
+            "GET_QUOTE", "SUBSCRIBE", "APPLY_NOW", "BOOK_NOW", "CALL_NOW",
+            "GET_DIRECTIONS", "SEND_EMAIL", "BUY_NOW", "WATCH_MORE",
+            "GET_OFFER", "DONATE_NOW", "NO_BUTTON"
+          ]
+        },
+        "value": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "link": { "type": "string", "pattern": "^https?://" }
+          }
+        }
+      }
+    }
+  }
+}

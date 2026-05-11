@@ -23,16 +23,16 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Phase 2 — Campaign JSON Schema
 
-- [ ] Create `schemas/campaign.schema.json` — JSON Schema (draft-07) for a complete campaign definition
+- [x] Create `schemas/campaign.schema.json` — JSON Schema (draft-07) for a complete campaign definition
   - Campaign-level fields: `name`, `objective`, `status`, `special_ad_categories`, `spend_cap`, `daily_budget`
   - Ad set-level fields: `name`, `status`, `targeting`, `billing_event`, `optimization_goal`, `bid_amount`, `daily_budget`, `lifetime_budget`, `start_time`, `end_time`
   - Ad-level fields: `name`, `status`, `creative`
   - Creative fields: `name`, `object_story_spec` (link data: `message`, `link`, `name`, `description`, `call_to_action`)
-- [ ] Create `schemas/state.schema.json` — schema for state files written after a push
+- [x] Create `schemas/state.schema.json` — schema for state files written after a push
   - Maps each campaign/adset/ad definition to its Facebook-assigned ID
   - Includes `last_pushed_at` timestamp and `account_id`
-- [ ] Create `campaigns/example.json` — a minimal but valid example campaign definition that passes schema validation
-- [ ] Write `tests/test_schema.py` — validate that `example.json` passes schema, and that malformed inputs fail with expected errors
+- [x] Create `campaigns/example.json` — a minimal but valid example campaign definition that passes schema validation
+- [x] Write `tests/test_schema.py` — validate that `example.json` passes schema, and that malformed inputs fail with expected errors
 
 ---
 
