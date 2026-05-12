@@ -26,6 +26,20 @@
       "type": "string",
       "description": "Directory for state files, relative to this config file. Defaults to 'state'.",
       "default": "state"
+    },
+    "email_addresses": {
+      "type": "array",
+      "description": "Approved inbound sender addresses for this customer. Emails from any other address are rejected.",
+      "items": { "type": "string" }
+    },
+    "operator_email": {
+      "type": "string",
+      "description": "Operator address that receives plan-review emails and sends GO/HOLD replies."
+    },
+    "bot_email": {
+      "type": "string",
+      "description": "From address used for all outbound emails (e.g. traffic@ryanbishop.me). Must be a verified Resend sender.",
+      "default": "traffic@ryanbishop.me"
     }
   }
 }

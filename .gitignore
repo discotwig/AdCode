@@ -5,6 +5,13 @@ customers/*/.env
 # State lock files (state JSON files are committed; lock files are not)
 state/*.lock
 
+# Email bot — pending state awaiting operator GO/HOLD
+customers/**/state/.pending_*
+
+# OAuth credentials (never commit)
+customers/*/gmail_credentials.json
+customers/*/.gmail_token
+
 # Python
 __pycache__/
 *.py[cod]

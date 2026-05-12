@@ -238,14 +238,14 @@ Phase 12 (customer registry, API key auth, GitHub API file storage, onboarding s
 
 Implement the directory layout and server configurability described in ADR-008. Each customer gets their own isolated working directory with credentials, campaigns, and state.
 
-- [ ] **Define `config.json` format** — schema for per-customer config: `customer_slug`, `account_id`, `campaigns_dir`, `state_dir`; create `schemas/customer_config.schema.json`
-- [ ] **Update `mcp_server.py` to accept `--config <path>`** — load `config.json` at startup; derive `campaigns_dir`, `state_dir`, and `account_id` from it; fall back to current env-var defaults when flag is absent (backwards compatible)
-- [ ] **Update `StateFile.load` / `save` paths** — accept an explicit base directory so state resolves relative to the customer folder, not the repo root
-- [ ] **Create `customers/` directory with `demo/` scaffold** — move `campaigns/demo/` and `state/act_366643171197739.json` under `customers/demo/`; add `customers/demo/config.json` and `customers/demo/.env.example`
-- [ ] **Update `.gitignore`** — add `customers/*/.env` so per-customer credential files are never committed
-- [ ] **Write `scripts/new_customer.py`** — onboarding script: accepts `customer_slug` and `account_id`, creates `customers/{slug}/` directory scaffold, copies `.env.example`, prints next steps
-- [ ] **Update README** — replace current setup instructions with customer-centric workflow; document `--config` flag and `new_customer.py`
-- [ ] **Update tests** — pass explicit `state_dir` to `StateFile` in test fixtures; add test for `--config` startup path in `test_mcp_server.py`
+- [x] **Define `config.json` format** — schema for per-customer config: `customer_slug`, `account_id`, `campaigns_dir`, `state_dir`; create `schemas/customer_config.schema.json`
+- [x] **Update `mcp_server.py` to accept `--config <path>`** — load `config.json` at startup; derive `campaigns_dir`, `state_dir`, and `account_id` from it; fall back to current env-var defaults when flag is absent (backwards compatible)
+- [x] **Update `StateFile.load` / `save` paths** — accept an explicit base directory so state resolves relative to the customer folder, not the repo root
+- [x] **Create `customers/` directory with `demo/` scaffold** — move `campaigns/demo/` and `state/act_366643171197739.json` under `customers/demo/`; add `customers/demo/config.json` and `customers/demo/.env.example`
+- [x] **Update `.gitignore`** — add `customers/*/.env` so per-customer credential files are never committed
+- [x] **Write `scripts/new_customer.py`** — onboarding script: accepts `customer_slug` and `account_id`, creates `customers/{slug}/` directory scaffold, copies `.env.example`, prints next steps
+- [x] **Update README** — replace current setup instructions with customer-centric workflow; document `--config` flag and `new_customer.py`
+- [x] **Update tests** — pass explicit `state_dir` to `StateFile` in test fixtures; add test for `--config` startup path in `test_mcp_server.py`
 
 ---
 
@@ -253,29 +253,45 @@ Implement the directory layout and server configurability described in ADR-008. 
 
 The client-facing interface for the contractor service model. Clients send media plans by email; the operator receives a plan for review; approved plans are applied to Facebook; clients receive confirmation. See ADR-008 for flow design.
 
+**Architecture:** Cloudflare Email Routing receives inbound mail at `traffic@ryanbishop.me`, an Email Worker POSTs the raw message to `https://api.ryanbishop.me/inbound`, and a FastAPI app on Fly.io handles the pipeline. Resend sends all outbound email.
+
 ### Inbound handling
 
-- [ ] **Create `src/email_bot.py`** — main entry point; poll or listen for inbound email via Gmail API (IMAP fallback); dispatch each message through the pipeline
-- [ ] **Sender authentication** — match `From` address against `email_addresses` in customer config; reject unrecognized senders with a polite error reply; log rejections
-- [ ] **Attachment extraction** — detect Excel (`.xlsx`) attachments and save to a temp path for ingestion; fall back to plain-text body parsing if no attachment
-- [ ] **Brief parsing** — if no Excel attachment, pass email body to `ingest_excel` equivalent for plain-text briefs; extract campaign intent and flag ambiguities
-- [ ] **Ambiguity handling** — if ingestion returns ambiguities, reply to sender listing them before proceeding; require clarification before generating a plan
+- [x] **Create `src/email_bot.py`** — FastAPI webhook server; `POST /inbound` receives raw email from Cloudflare Email Worker and dispatches through the pipeline
+- [x] **Sender authentication** — match `From` address against `email_addresses` in customer config; reject unrecognized senders; log rejections
+- [x] **Attachment extraction** — detect Excel (`.xlsx`) attachments and save to a temp path for ingestion; fall back to plain-text body parsing if no attachment
+- [x] **Brief parsing** — if no Excel attachment, pass email body to `extract_from_text()` in `src/services/brief.py` via Claude; extract campaign intent and flag ambiguities
+- [x] **Ambiguity handling** — if ingestion returns ambiguities, reply to sender listing them before proceeding
 
 ### Plan-review gate (operator flow)
 
-- [ ] **Generate plan** — run `plan_campaigns` on ingested JSON; format output as a readable email
-- [ ] **Email operator with plan** — send plan to operator address with reply instructions: reply `GO` to apply, `HOLD` to discard, or quote-reply with edits
-- [ ] **Parse operator reply** — detect `GO` / `HOLD` keyword in reply subject or body; extract any JSON edits the operator quoted
-- [ ] **Apply on approval** — on `GO`, run `apply_campaigns` with the approved JSON; on `HOLD`, notify client that the brief is under review
+- [x] **Generate plan** — run `plan()` on ingested JSON; format output as readable text
+- [x] **Email operator with plan** — send plan to `operator_email` with subject `[AdCode Review] {pending_id} | {original_subject}`; operator replies GO or HOLD
+- [x] **Parse operator reply** — detect `GO` / `HOLD` keyword in reply body; match pending file via `pending_id` in subject
+- [x] **Apply on approval** — on `GO`, run `apply_plan()`; on `HOLD`, notify client and discard pending file
 
 ### Outbound confirmation
 
-- [ ] **Confirmation to client** — after successful apply, send client a summary: campaigns created/updated, any warnings, git commit hash as reference
-- [ ] **Error notification** — if apply fails, email operator with full error detail; send client a "we're looking into it" reply
+- [x] **Confirmation to client** — after successful apply, send client a summary via Resend
+- [x] **Hold notice** — on HOLD, send client a polite hold notification
 
 ### Infrastructure
 
-- [ ] **Gmail API integration** — OAuth2 credentials for the operator inbox; store token in `customers/{slug}/.gmail_token` (gitignored); refresh automatically
-- [ ] **Create `src/services/email.py`** — send/receive helpers wrapping the Gmail API: `send_reply(to, subject, body, thread_id)`, `list_unread(label)`, `mark_read(message_id)`
-- [ ] **Polling loop** — run as a long-lived process; poll inbox every 60 seconds; process one message at a time per customer to avoid race conditions on state files
-- [ ] **Write `tests/test_email_bot.py`** — mock Gmail API; test sender auth, attachment extraction, plan generation, operator reply parsing, confirmation send; test `HOLD` path discards without applying
+- [x] **Create `src/services/email.py`** — Resend outbound wrapper: `send_email(msg, api_key)` with `EmailMessage` dataclass
+- [x] **Create `src/services/brief.py`** — plain-text brief extraction via Claude using `BRIEF_EXTRACT` prompt; returns same `IngestionResult` shape as `extract_campaigns()`
+- [x] **Create `src/workers/inbound.js`** — Cloudflare Email Worker; POSTs raw email JSON to webhook URL with shared secret
+- [x] **Create `Dockerfile`** — `python:3.12-slim`, installs requirements, runs `uvicorn src.email_bot:app`
+- [x] **Create `fly.toml`** — Fly.io config; always-on, 256 MB, persistent volume mounted at `/app/customers`
+- [x] **Add `BRIEF_EXTRACT` prompt to `src/prompts.py`**
+- [x] **Update `schemas/customer_config.schema.json`** — add `email_addresses`, `operator_email`, `bot_email` fields
+- [x] **Update `customers/demo/config.json`** — add email fields
+- [x] **Update `.gitignore`** — add `customers/**/state/.pending_*`
+- [x] **Write `tests/test_email_bot.py`** — 12 tests; mock Resend, MetaClient, Anthropic; test sender auth, ambiguity reply, plan gate, GO/HOLD flow, unknown sender rejection
+
+### Deployment (one-time operator steps)
+
+- [ ] **Cloudflare Email Routing** — enable on `ryanbishop.me`; add route `traffic@ryanbishop.me` → Email Worker
+- [ ] **Deploy Email Worker** — `wrangler deploy src/workers/inbound.js`; set `WEBHOOK_URL` and `WEBHOOK_SECRET` secrets
+- [ ] **Resend domain verification** — add `ryanbishop.me` to Resend; add SPF/DKIM/DMARC records to Cloudflare DNS
+- [ ] **Fly.io app** — `flyctl launch --no-deploy`; `flyctl volumes create adcode_data --size 1 --region iad`; `flyctl secrets set WEBHOOK_SECRET=... RESEND_API_KEY=...`; `flyctl deploy`
+- [ ] **Cloudflare DNS** — add CNAME `api.ryanbishop.me` → Fly.io app hostname

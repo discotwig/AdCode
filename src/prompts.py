@@ -28,6 +28,38 @@ Campaign JSON:
 
 Return only the JSON array, no other text."""
 
+# Extracts campaign JSON from a plain-text email brief; same return shape as EXCEL_INGEST.
+BRIEF_EXTRACT = """\
+You are an ad trafficking assistant. Your job is to extract Facebook ad campaign definitions
+from a plain-text email brief and convert them into structured JSON matching the schema below.
+
+The email may be informal, use shorthand, or omit fields. Use your best judgement.
+
+Campaign JSON schema (required fields only, refer to this for structure):
+{schema}
+
+Email body:
+{email_body}
+
+Instructions:
+1. Extract all distinct ad campaigns you can identify.
+2. For each campaign, create a complete JSON object matching the schema.
+3. Use "PAUSED" as the default status for all objects unless the email clearly indicates otherwise.
+4. If a required field is ambiguous or missing, use your best guess and record it as an ambiguity.
+5. The account_id should be taken from the email if present; otherwise use "act_000000000".
+
+Respond with a JSON object with two keys:
+- "campaigns": array of campaign JSON objects matching the schema structure (just the array of campaign objects, not the top-level wrapper)
+- "ambiguities": array of ambiguity objects, each with:
+  - "field": the JSON path of the ambiguous field
+  - "sheet": "" (not applicable for email)
+  - "cell_ref": "" (not applicable for email)
+  - "raw_value": the raw text from the email that was ambiguous
+  - "question": what you are unsure about and what human review should verify
+- "confidence": a float from 0.0 to 1.0 representing your overall confidence in the extraction
+
+Return only the JSON object, no other text."""
+
 # Extracts campaign JSON from a raw Excel structure; returns campaigns, ambiguities, and confidence.
 EXCEL_INGEST = """\
 You are an ad trafficking assistant. Your job is to extract Facebook ad campaign definitions
