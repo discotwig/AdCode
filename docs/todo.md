@@ -311,8 +311,39 @@ Pending files (`.pending_{id}.json`) are stored on the Fly.io volume and lost if
 
 ### Solution
 
-- [ ] **Pending file expiry check** — on startup, scan all `state/.pending_*.json` files; any older than 24 hours should trigger an operator notification email listing the expired briefs so they can be re-requested
-- [ ] **Startup scan in `email_bot.py`** — add a FastAPI `startup` event handler that calls `_scan_expired_pending()` on boot
-- [ ] **`_scan_expired_pending()`** — load all customer configs; for each, scan `state_dir` for `.pending_*` files; if `created_at` is >24h ago, send operator an email listing the brief (client, subject, created_at) and delete the pending file
-- [ ] **Operator notification template** — subject: `[AdCode] Expired brief: {client_subject}`; body lists what was lost and asks operator to request re-send from client if needed
-- [ ] **Write `tests/test_pending_expiry.py`** — test that expired files trigger operator notification; test that non-expired files are left alone; test with multiple customers
+- [x] **Pending file expiry check** — on startup, scan all `state/.pending_*.json` files; any older than 24 hours trigger an operator notification email
+- [x] **Startup scan in `email_bot.py`** — FastAPI lifespan context manager calls `_scan_expired_pending()` on boot (replaces deprecated `@app.on_event`)
+- [x] **`_scan_expired_pending()`** — load all customer configs; for each, scan `state_dir` for `.pending_*` files; if `created_at` is >24h ago, send operator email and delete
+- [x] **Operator notification template** — subject: `[AdCode] Expired brief: {client_subject}`
+- [x] **Write `tests/test_pending_expiry.py`** — 5 tests; all passing
+
+---
+
+## Phase 16 — Email Bot Bug Fixes (in progress)
+
+Several bugs discovered during real-world testing of the email bot. None have resulted in a successful Facebook push via email yet.
+
+### Bugs fixed
+
+- [x] **AI code fence stripping** — Claude wraps JSON in ` ```json ``` ` fences; `json.loads()` failed on raw text. Fixed in `ingest.py` and `brief.py`
+- [x] **Empty `to` field on Resend** — `_parse_raw_email("")` returned empty `from`; fixed by falling back to webhook envelope address
+- [x] **Thread-aware extraction** — `BRIEF_EXTRACT` prompt updated to synthesise full quoted thread so client can reply with answers inline
+- [x] **Anthropic 529 overload — Worker rejection** — 529 caused 500 → Worker rejected email to sender. Fixed: `max_retries=6` + catch `APIStatusError(529)` and return 200 with graceful client notice
+- [x] **Opus model in `brief.py`** — `claude-opus-4-7` has much lower rate limits; switched to `claude-sonnet-4-6`
+- [x] **Markdown rendering** — email HTML was raw markdown (asterisks); added `markdown` library with `nl2br` + `tables` extensions
+- [x] **Account ID in ambiguity questions** — prompts were flagging missing `account_id` as an ambiguity; suppressed since it comes from `config.json`
+- [x] **Ambiguity email format** — redesigned to multiple-choice lettered questions with suggested options; campaign summary as a table
+
+### Active bug — clarification reply loop
+
+**Symptom:** Client replies with answers (e.g. "A-a, B-b") but receives another round of the same clarification questions instead of a plan email.
+
+**Root cause:** On a reply, the bot re-runs `extract_from_text()` on the thread body. Claude re-extracts campaigns from scratch, re-discovers the same missing fields, and generates the same questions again. The thread context is not sufficient to resolve structured fields like image hashes, page IDs, and bid strategy.
+
+**Fix implemented (not yet confirmed working):** Stateful clarification files (`.clarifying_{id}.json`) save the extracted draft campaigns when ambiguities are found. The reply subject contains `[Clarify-{id}]`; matching replies route to `_handle_clarification()` which applies answers to the saved draft via `_APPLY_CLARIFICATIONS` prompt instead of re-extracting. Commit `46aca6f`.
+
+**To verify:**
+- [ ] Confirm `[Clarify-{id}]` survives Gmail's reply subject rewriting (Gmail may strip or alter brackets in subjects)
+- [ ] Add logging to confirm `_handle_clarification` is being reached vs falling through to `_handle_inbound`
+- [ ] If subject matching fails, fall back to matching by `In-Reply-To` header against stored `message_id` from the clarification email
+- [ ] End-to-end test: xlsx → clarification questions → reply → operator plan email → GO → Facebook push

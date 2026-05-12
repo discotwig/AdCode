@@ -227,7 +227,7 @@ configure_logging()
 pytest tests/
 ```
 
-214 tests, all local with mocks. Should pass out of the box.
+220+ tests, all local with mocks. Should pass out of the box.
 
 ### Integration tests (Facebook sandbox)
 

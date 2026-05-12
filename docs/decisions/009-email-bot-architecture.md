@@ -60,5 +60,22 @@ Pending briefs are stored as `.pending_{id}.json` files in the customer's `state
 
 - No Gmail account or OAuth flow needed — Cloudflare handles inbound
 - All infrastructure is within the Cloudflare + Fly.io ecosystem — no Google or AWS dependency
-- Pending files are local to the Fly.io volume — not committed to git; a machine restart before GO/HOLD discards the pending (acceptable for now; operator can re-request)
+- Pending files are local to the Fly.io volume — not committed to git; a machine restart before GO/HOLD discards the pending (acceptable; Phase 15 startup sweep notifies operator of expired briefs)
 - MCP server still runs locally via stdio transport; cloud MCP via SSE is deferred
+
+## Operational notes (learned during deployment)
+
+- **Cloudflare SSL must be set to "Full"** (not Flexible). Flexible causes 520 errors; Strict causes 525 TLS handshake failures on Fly.io.
+- **DNS: Cloudflare proxy must be OFF** for `api.ryanbishop.me`. Use A/AAAA records pointing to Fly.io IPs (not CNAME). Cloudflare proxy conflicts with Fly.io's Let's Encrypt TLS cert.
+- **Fly.io volume shadows Docker image** — volume at `/app/customers` overwrites the image's `customers/` directory. `entrypoint.sh` copies `config.json` from `customers_defaults/` (baked into image) to the volume on every boot.
+- **Cloudflare "Dropped" status is normal** — when an Email Worker handles an email, Email Routing shows "Dropped". This means the Worker consumed it, not that it was lost. Real signal is Worker logs showing `outcome: ok`.
+- **Worker rejection = Fly.io 500** — if the FastAPI handler throws (e.g. Anthropic 529), Fly.io returns 500 → Worker calls `message.setReject()` → email bounces to sender. Mitigated with `max_retries=6` and explicit 529 catch returning 200.
+- **All AI calls use `claude-sonnet-4-6`** — Opus has much lower rate limits and caused persistent 529 errors during testing.
+
+## Clarification flow design
+
+When extraction produces ambiguities, the bot saves a `.clarifying_{id}.json` state file and sends a multiple-choice question email with `[Clarify-{id}]` embedded in the subject. Client replies route to `_handle_clarification()` which applies answers to the saved draft via `_APPLY_CLARIFICATIONS` prompt.
+
+This keeps `ingest.py`, `brief.py`, and `prompts.py` clean and shared with the MCP server. All email conversation state management is isolated to `email_bot.py`.
+
+**Known issue (as of 2026-05-12):** Subject-based `[Clarify-{id}]` matching may not survive Gmail's reply subject rewriting. Fallback to `In-Reply-To` header matching is the likely fix — see Phase 16 in `docs/todo.md`.
