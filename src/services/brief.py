@@ -26,6 +26,11 @@ def extract_from_text(body: str, ai_client) -> IngestionResult:
         messages=[{"role": "user", "content": prompt}],
     )
     raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rstrip("`").strip()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
