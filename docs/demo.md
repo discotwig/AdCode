@@ -136,7 +136,37 @@ FIELD_MISMATCH  campaign  AdCode Demo — Brand Awareness
 
 ---
 
-## Test 7 — Read state without hitting the API
+## Test 7 — Drift remediation: import untracked ad sets
+
+**What it shows:** Once drift is detected, AdCode can adopt untracked ad sets from Facebook into the JSON and state file in one step — no manual transcription from Ads Manager.
+
+*(Run Test 6 first so there is drift to remediate.)*
+
+Ask Claude:
+> *"Import the untracked ad sets for act_366643171197739 into campaigns/demo/act_366643171197739/demo_v1.json"*
+
+**Expected result:**
+```
+Imported 3 ad set(s) into demo_v1.json and state:
+  + My campaign 1017 / My Ad Set  (fb_id: 23848811670940718)
+  + Test API Campaign 1 / Test API AdSet 1  (fb_id: 23845817916220718)
+  + Atlanta Debut / Atlanta Debut  (fb_id: 23845815648140718)
+
+Run plan_campaigns to verify no spurious changes before committing.
+```
+
+Then confirm nothing would be pushed:
+> *"Validate campaigns/demo/act_366643171197739/demo_v1.json"*
+
+**Expected result:** `No changes — Facebook already matches this configuration.`
+
+Commit the updated JSON to lock the imported ad sets into source control.
+
+**Talking point for client:** *"Anything created outside AdCode — by another trafficker, a legacy script, or an agency — can be adopted into the managed state in one command. From that point on, it's fully tracked: changes go through Git, drift is detected, and deletions require an explicit JSON edit."*
+
+---
+
+## Test 8 — Read state without hitting the API
 
 **What it shows:** Instant read-only inspection from the state file.
 

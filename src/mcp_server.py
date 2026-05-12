@@ -20,7 +20,7 @@ from src.services.state import StateFile
 from src.services.validate import validate_all
 from src.services.ingest import read_excel, extract_campaigns, format_ambiguity_report
 from src.traffic import load_campaign_json, plan, apply as apply_plan, DeleteCampaign, DeleteAdSet, DeleteAd
-from src.reconcile import fetch_actuals, diff_state, format_report
+from src.reconcile import fetch_actuals, diff_state, format_report, DriftType
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -194,6 +194,30 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="import_adsets",
+            description=(
+                "Adopt ad sets that exist on Facebook but are not tracked in the AdCode state file "
+                "(MISSING_FROM_STATE items from get_drift_report). "
+                "Fetches each ad set's live configuration from Facebook, merges it into the campaign JSON file, "
+                "and registers it in the state file so plan_campaigns treats it as already managed. "
+                "Does not push any changes to Facebook — read-then-write to local files only. "
+                "Run plan_campaigns after importing to confirm no spurious changes before committing."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["account_id", "json_path"],
+                "properties": {
+                    "account_id": {"type": "string", "description": "Ad account ID (e.g. act_366643171197739)."},
+                    "json_path": {"type": "string", "description": "Path to the campaign JSON file to update."},
+                    "adset_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Subset of ad set names to import. Imports all MISSING_FROM_STATE ad sets if omitted.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -220,6 +244,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _list_campaigns(arguments)
         elif name == "ingest_excel":
             return await _ingest_excel(arguments)
+        elif name == "import_adsets":
+            return await _import_adsets(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as e:
@@ -375,6 +401,69 @@ async def _ingest_excel(args: dict) -> list[TextContent]:
         "campaigns": result.campaigns,
     }
     lines = [report, "", "Extracted campaign JSON:", json.dumps(output, indent=2)]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _import_adsets(args: dict) -> list[TextContent]:
+    account_id = args["account_id"]
+    json_path = args["json_path"]
+    name_filter = set(args["adset_names"]) if args.get("adset_names") else None
+
+    meta = _get_meta_client()
+    state = StateFile.load(account_id)
+    actuals = fetch_actuals(account_id, meta)
+    report = diff_state(state, actuals)
+
+    candidates = [
+        item for item in report.items
+        if item.drift_type == DriftType.MISSING_FROM_STATE and item.object_type == "adset"
+    ]
+    if name_filter:
+        candidates = [a for a in candidates if a.name in name_filter]
+
+    if not candidates:
+        return [TextContent(type="text", text="No untracked ad sets found — nothing to import.")]
+
+    campaign_json = load_campaign_json(json_path)
+    campaigns_by_name = {c["name"]: i for i, c in enumerate(campaign_json["campaigns"])}
+
+    imported, skipped = [], []
+    for item in candidates:
+        parent = next(
+            (cname for cname, cdata in actuals.items() if item.name in cdata.get("ad_sets", {})),
+            None,
+        )
+        if parent is None or parent not in campaigns_by_name:
+            skipped.append(item.name)
+            continue
+
+        live = actuals[parent]["ad_sets"][item.name]
+        adset_entry: dict = {"name": item.name, "status": live.get("status", "PAUSED"), "ads": []}
+        for field in ("daily_budget", "lifetime_budget", "billing_event", "optimization_goal",
+                      "bid_strategy", "targeting"):
+            if live.get(field) is not None:
+                adset_entry[field] = live[field]
+
+        idx = campaigns_by_name[parent]
+        campaign_json["campaigns"][idx].setdefault("ad_sets", [])
+        campaign_json["campaigns"][idx]["ad_sets"].append(adset_entry)
+
+        params = {k: v for k, v in adset_entry.items() if k != "ads"}
+        state.upsert_adset(parent, item.name, item.fb_id, params)
+        imported.append(f"{parent} / {item.name}  (fb_id: {item.fb_id})")
+
+    with open(json_path, "w") as fh:
+        json.dump(campaign_json, fh, indent=2)
+    state.save()
+
+    lines = [f"Imported {len(imported)} ad set(s) into {Path(json_path).name} and state:"]
+    for entry in imported:
+        lines.append(f"  + {entry}")
+    if skipped:
+        lines.extend(["", "Skipped (parent campaign not in JSON):"])
+        for s in skipped:
+            lines.append(f"  - {s}")
+    lines.extend(["", "Run plan_campaigns to verify no spurious changes before committing."])
     return [TextContent(type="text", text="\n".join(lines))]
 
 

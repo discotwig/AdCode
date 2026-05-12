@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from src.mcp_server import (
     _apply_campaigns, _plan_campaigns, _pause_campaigns,
     _get_local_state, _get_campaign_status, _get_drift_report,
-    _list_campaigns, _ingest_excel, list_tools,
+    _list_campaigns, _ingest_excel, _import_adsets, list_tools,
 )
 from src.services.state import StateFile
 
@@ -355,3 +355,136 @@ async def test_get_drift_report_returns_report():
           patch("src.mcp_server.StateFile.load", return_value=state)):
         result = await _get_drift_report({"account_id": "act_123"})
     assert len(result[0].text) > 0
+
+
+# ------------------------------------------------------------------
+# import_adsets
+# ------------------------------------------------------------------
+
+def _make_actuals(with_adset=True):
+    adsets = {}
+    if with_adset:
+        adsets["Untracked Ad Set"] = {
+            "fb_id": "adset_999",
+            "id": "adset_999",
+            "name": "Untracked Ad Set",
+            "status": "PAUSED",
+            "billing_event": "LINK_CLICKS",
+            "optimization_goal": "LINK_CLICKS",
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "daily_budget": 500,
+            "targeting": {"age_min": 25, "age_max": 44, "geo_locations": {"countries": ["US"]}},
+            "ads": {},
+        }
+    return {
+        "Parent Campaign": {
+            "fb_id": "camp_001",
+            "id": "camp_001",
+            "name": "Parent Campaign",
+            "status": "PAUSED",
+            "ad_sets": adsets,
+        }
+    }
+
+
+def _make_campaign_json(tmp_path, with_adset=False):
+    data = {
+        "account_id": "act_123",
+        "campaigns": [
+            {
+                "name": "Parent Campaign",
+                "objective": "REACH",
+                "status": "PAUSED",
+                "special_ad_categories": [],
+                "ad_sets": [{"name": "Untracked Ad Set", "status": "PAUSED", "ads": []}] if with_adset else [],
+            }
+        ],
+    }
+    path = tmp_path / "test.json"
+    path.write_text(json.dumps(data))
+    return str(path)
+
+
+@pytest.mark.asyncio
+async def test_import_adsets_imports_missing_adset(tmp_path):
+    state = StateFile("act_123")
+    state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    json_path = _make_campaign_json(tmp_path)
+    actuals = _make_actuals(with_adset=True)
+
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _import_adsets({"account_id": "act_123", "json_path": json_path})
+
+    text = result[0].text
+    assert "Imported 1" in text
+    assert "Untracked Ad Set" in text
+
+    updated = json.loads(Path(json_path).read_text())
+    adset_names = [a["name"] for a in updated["campaigns"][0]["ad_sets"]]
+    assert "Untracked Ad Set" in adset_names
+    assert updated["campaigns"][0]["ad_sets"][0]["bid_strategy"] == "LOWEST_COST_WITHOUT_CAP"
+    assert state.get_adset_id("Parent Campaign", "Untracked Ad Set") == "adset_999"
+
+
+@pytest.mark.asyncio
+async def test_import_adsets_filters_by_name(tmp_path):
+    state = StateFile("act_123")
+    state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    json_path = _make_campaign_json(tmp_path)
+
+    actuals = _make_actuals(with_adset=False)
+    actuals["Parent Campaign"]["ad_sets"]["Ad Set A"] = {
+        "fb_id": "adset_A", "id": "adset_A", "name": "Ad Set A",
+        "status": "PAUSED", "billing_event": "LINK_CLICKS", "optimization_goal": "LINK_CLICKS",
+        "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "daily_budget": 300, "targeting": {}, "ads": {},
+    }
+    actuals["Parent Campaign"]["ad_sets"]["Ad Set B"] = {
+        "fb_id": "adset_B", "id": "adset_B", "name": "Ad Set B",
+        "status": "PAUSED", "billing_event": "LINK_CLICKS", "optimization_goal": "LINK_CLICKS",
+        "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "daily_budget": 400, "targeting": {}, "ads": {},
+    }
+
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _import_adsets({
+            "account_id": "act_123",
+            "json_path": json_path,
+            "adset_names": ["Ad Set A"],
+        })
+
+    text = result[0].text
+    assert "Imported 1" in text
+    updated = json.loads(Path(json_path).read_text())
+    adset_names = [a["name"] for a in updated["campaigns"][0]["ad_sets"]]
+    assert "Ad Set A" in adset_names
+    assert "Ad Set B" not in adset_names
+
+
+@pytest.mark.asyncio
+async def test_import_adsets_skips_already_tracked(tmp_path):
+    state = StateFile("act_123")
+    state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    state.upsert_adset("Parent Campaign", "Untracked Ad Set", "adset_999",
+                       {"name": "Untracked Ad Set", "status": "PAUSED"})
+    json_path = _make_campaign_json(tmp_path, with_adset=True)
+    actuals = _make_actuals(with_adset=True)
+
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _import_adsets({"account_id": "act_123", "json_path": json_path})
+
+    assert "nothing to import" in result[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_tools_includes_import_adsets():
+    tools = await list_tools()
+    names = {t.name for t in tools}
+    assert "import_adsets" in names
