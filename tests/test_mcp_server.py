@@ -40,7 +40,7 @@ def _make_meta_client():
 
 EXAMPLE_PATH = str(CAMPAIGNS_DIR / "example.json")
 
-with open(EXAMPLE_PATH) as _f:
+with open(EXAMPLE_PATH, encoding="utf-8") as _f:
     EXAMPLE_JSON = json.load(_f)
 
 

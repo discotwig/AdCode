@@ -1,20 +1,20 @@
 {
   "account_id": "act_366643171197739",
-  "last_pushed_at": "2026-05-11T22:40:15.957241+00:00",
+  "last_pushed_at": "2026-05-12T03:55:30.270960+00:00",
   "campaigns": {
-    "AdCode Demo \u00e2\u20ac\u201d Brand Awareness": {
+    "AdCode Demo \u2014 Brand Awareness": {
       "fb_id": "120244515578050719",
       "params": {
-        "name": "AdCode Demo \u00e2\u20ac\u201d Brand Awareness",
+        "name": "AdCode Demo \u2014 Brand Awareness",
         "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
         "special_ad_categories": []
       },
       "ad_sets": {
-        "US 25-44 \u00e2\u20ac\u201d Broad": {
+        "US 25-44 \u2014 Broad": {
           "fb_id": "120244517614370719",
           "params": {
-            "name": "US 25-44 \u00e2\u20ac\u201d Broad",
+            "name": "US 25-44 \u2014 Broad",
             "status": "PAUSED",
             "daily_budget": 1000,
             "billing_event": "LINK_CLICKS",
@@ -38,11 +38,11 @@
             }
           },
           "ads": {
-            "Demo Ad \u00e2\u20ac\u201d Headline v1": {
+            "Demo Ad \u2014 Headline v1": {
               "fb_id": "120244517774310719",
               "creative_id": "1684264789277391",
               "params": {
-                "name": "Demo Ad \u00e2\u20ac\u201d Headline v1",
+                "name": "Demo Ad \u2014 Headline v1",
                 "status": "PAUSED"
               }
             }
@@ -58,7 +58,34 @@
         "status": "PAUSED",
         "special_ad_categories": []
       },
-      "ad_sets": {}
+      "ad_sets": {
+        "My Ad Set": {
+          "fb_id": "23848811670940718",
+          "params": {
+            "name": "My Ad Set",
+            "status": "PAUSED",
+            "daily_budget": 1000,
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": "REACH",
+            "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
+            "bid_amount": 2,
+            "start_time": "2021-10-17T16:15:39-0400",
+            "targeting": {
+              "age_max": 65,
+              "age_min": 18,
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ],
+                "location_types": [
+                  "home"
+                ]
+              }
+            }
+          },
+          "ads": {}
+        }
+      }
     },
     "Test API Campaign 1": {
       "fb_id": "23845817703660718",
@@ -68,7 +95,35 @@
         "status": "PAUSED",
         "special_ad_categories": []
       },
-      "ad_sets": {}
+      "ad_sets": {
+        "Test API AdSet 1": {
+          "fb_id": "23845817916220718",
+          "params": {
+            "name": "Test API AdSet 1",
+            "status": "PAUSED",
+            "lifetime_budget": 3000,
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": "PAGE_LIKES",
+            "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
+            "bid_amount": 1000,
+            "start_time": "2020-09-16T20:18:29-0400",
+            "end_time": "2020-09-26T16:18:29-0400",
+            "targeting": {
+              "age_max": 65,
+              "age_min": 18,
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ],
+                "location_types": [
+                  "home"
+                ]
+              }
+            }
+          },
+          "ads": {}
+        }
+      }
     },
     "Atlanta Debut": {
       "fb_id": "23845815648120718",
@@ -78,7 +133,116 @@
         "status": "PAUSED",
         "special_ad_categories": []
       },
-      "ad_sets": {}
+      "ad_sets": {
+        "Atlanta Debut": {
+          "fb_id": "23845815648140718",
+          "params": {
+            "name": "Atlanta Debut",
+            "status": "PAUSED",
+            "lifetime_budget": 3000,
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": "REACH",
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "start_time": "2020-09-20T15:55:29-0400",
+            "end_time": "2020-10-16T15:55:29-0400",
+            "targeting": {
+              "age_max": 60,
+              "age_min": 35,
+              "flexible_spec": [
+                {
+                  "behaviors": [
+                    {
+                      "id": "6002714898572",
+                      "name": "Small business owners"
+                    }
+                  ],
+                  "industries": [
+                    {
+                      "id": "6008888954983",
+                      "name": "Administrative Services"
+                    },
+                    {
+                      "id": "6008888961983",
+                      "name": "IT and Technical Services"
+                    },
+                    {
+                      "id": "6008888980183",
+                      "name": "Sales"
+                    },
+                    {
+                      "id": "6009003307783",
+                      "name": "Business and Finance"
+                    },
+                    {
+                      "id": "6009003311983",
+                      "name": "Management"
+                    },
+                    {
+                      "id": "6012901802383",
+                      "name": "Arts, Entertainment, Sports and Media"
+                    },
+                    {
+                      "id": "6012903126783",
+                      "name": "Architecture and Engineering"
+                    },
+                    {
+                      "id": "6012903168383",
+                      "name": "Community and Social Services"
+                    }
+                  ],
+                  "work_positions": [
+                    {
+                      "id": "109288035760640",
+                      "name": "Business Owner"
+                    },
+                    {
+                      "id": "117677474946712",
+                      "name": "Owner/Manager/CEO"
+                    },
+                    {
+                      "id": "138050029568986",
+                      "name": "Owner and Founder"
+                    },
+                    {
+                      "id": "874842615892965",
+                      "name": "Managing Director"
+                    }
+                  ]
+                }
+              ],
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ],
+                "location_types": [
+                  "home",
+                  "recent"
+                ]
+              },
+              "brand_safety_content_filter_levels": [
+                "FACEBOOK_STANDARD"
+              ],
+              "publisher_platforms": [
+                "facebook"
+              ],
+              "facebook_positions": [
+                "feed",
+                "video_feeds",
+                "instant_article",
+                "instream_video",
+                "marketplace",
+                "story",
+                "search"
+              ],
+              "device_platforms": [
+                "mobile",
+                "desktop"
+              ]
+            }
+          },
+          "ads": {}
+        }
+      }
     }
   }
 }

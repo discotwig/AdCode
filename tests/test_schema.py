@@ -22,7 +22,7 @@ def state_schema():
 
 @pytest.fixture
 def example_campaign():
-    with open(CAMPAIGNS_DIR / "example.json") as f:
+    with open(CAMPAIGNS_DIR / "example.json", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -130,10 +130,10 @@ class TestCampaignSchema:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(example_campaign, campaign_schema)
 
-    def test_empty_ads_array_fails(self, campaign_schema, example_campaign):
+    def test_empty_ads_array_is_valid(self, campaign_schema, example_campaign):
+        # Ad sets imported from Facebook may have no ads yet
         example_campaign["campaigns"][0]["ad_sets"][0]["ads"] = []
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(example_campaign, campaign_schema)
+        jsonschema.validate(example_campaign, campaign_schema)  # must not raise
 
     def test_missing_ads_key_fails(self, campaign_schema, example_campaign):
         del example_campaign["campaigns"][0]["ad_sets"][0]["ads"]

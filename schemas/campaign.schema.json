@@ -95,7 +95,7 @@
         },
         "optimization_goal": {
           "type": "string",
-          "enum": ["IMPRESSIONS", "REACH", "LINK_CLICKS", "LANDING_PAGE_VIEWS", "LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "VALUE", "APP_INSTALLS", "PAGE_ENGAGEMENT", "THRUPLAY", "CONVERSATIONS"]
+          "enum": ["IMPRESSIONS", "REACH", "LINK_CLICKS", "LANDING_PAGE_VIEWS", "LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "VALUE", "APP_INSTALLS", "PAGE_ENGAGEMENT", "PAGE_LIKES", "THRUPLAY", "CONVERSATIONS"]
         },
         "bid_strategy": {
           "type": "string",
@@ -128,7 +128,8 @@
         },
         "ads": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
+          "description": "May be empty for ad sets imported from Facebook that have no live ads yet.",
           "items": { "$ref": "#/definitions/ad" }
         }
       }

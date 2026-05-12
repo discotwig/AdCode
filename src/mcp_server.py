@@ -450,9 +450,18 @@ async def _import_adsets(args: dict) -> list[TextContent]:
         live = actuals[parent]["ad_sets"][item.name]
         adset_entry: dict = {"name": item.name, "status": live.get("status", "PAUSED"), "ads": []}
         for field in ("daily_budget", "lifetime_budget", "billing_event", "optimization_goal",
-                      "bid_strategy", "targeting"):
-            if live.get(field) is not None:
-                adset_entry[field] = _to_plain(live[field])
+                      "bid_strategy", "bid_amount", "start_time", "end_time", "targeting"):
+            if live.get(field) is None:
+                continue
+            val = _to_plain(live[field])
+            if field in ("daily_budget", "lifetime_budget", "bid_amount") and val != "":
+                try:
+                    val = int(val)
+                except (TypeError, ValueError):
+                    pass
+            if field in ("daily_budget", "lifetime_budget") and val == 0:
+                continue
+            adset_entry[field] = val
 
         idx = campaigns_by_name[parent]
         campaign_json["campaigns"][idx].setdefault("ad_sets", [])
@@ -462,8 +471,8 @@ async def _import_adsets(args: dict) -> list[TextContent]:
         state.upsert_adset(parent, item.name, item.fb_id, params)
         imported.append(f"{parent} / {item.name}  (fb_id: {item.fb_id})")
 
-    with open(json_path, "w") as fh:
-        json.dump(campaign_json, fh, indent=2)
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(campaign_json, fh, indent=2, ensure_ascii=False)
     state.save()
 
     lines = [f"Imported {len(imported)} ad set(s) into {Path(json_path).name} and state:"]

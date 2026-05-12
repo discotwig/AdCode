@@ -154,7 +154,7 @@ def _creative_api_params(creative: dict, page_id_override: str | None = None) ->
 # ------------------------------------------------------------------
 
 def load_campaign_json(path: str) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     jsonschema.validate(data, _CAMPAIGN_SCHEMA)
     return data

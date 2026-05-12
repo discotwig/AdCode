@@ -17,7 +17,7 @@ class StateFile:
         path = STATE_DIR / f"{account_id}.json"
         if not path.exists():
             return cls(account_id)
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return cls(account_id, json.load(f))
 
     def save(self) -> None:
@@ -25,7 +25,7 @@ class StateFile:
         self._data["last_pushed_at"] = datetime.now(timezone.utc).isoformat()
         path = STATE_DIR / f"{self.account_id}.json"
         tmp_path = path.with_suffix(".tmp")
-        with open(tmp_path, "w") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._data, f, indent=2)
         os.replace(tmp_path, path)
 
