@@ -26,6 +26,8 @@ from dotenv import dotenv_values, load_dotenv
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 
+import markdown as markdown_lib
+
 from src.api.meta import MetaClient
 from src.services.email import send_email, EmailMessage
 from src.services.ingest import read_excel, extract_campaigns
@@ -95,7 +97,7 @@ def _scan_expired_pending():
                         from_=bot_email,
                         to=operator_email,
                         subject=f"[AdCode] Expired brief: {client_subject}",
-                        html=body.replace("\n", "<br>"),
+                        html=_to_html(body),
                     ), resend_key)
                 pending_path.unlink()
                 logger.info("Expired pending_id=%s from=%s", pending.get("pending_id"), client_from)
@@ -172,6 +174,11 @@ def _parse_raw_email(raw: str) -> dict:
     return result
 
 
+def _to_html(text: str) -> str:
+    """Convert markdown or plain text to HTML for email sending."""
+    return markdown_lib.markdown(text, extensions=["nl2br"])
+
+
 # ------------------------------------------------------------------
 # Plan formatting
 # ------------------------------------------------------------------
@@ -221,7 +228,7 @@ async def _handle_inbound(parsed: dict, customer: dict):
             from_=bot_email,
             to=_bare_email(from_addr),
             subject=f"Re: {subject}",
-            html=body_text.replace("\n", "<br>"),
+            html=_to_html(body_text),
             reply_to=bot_email,
             in_reply_to=parsed["message_id"] or None,
         ), resend_key)
@@ -309,7 +316,7 @@ async def _handle_inbound(parsed: dict, customer: dict):
         from_=bot_email,
         to=operator_email,
         subject=op_subject,
-        html=op_body.replace("\n", "<br>"),
+        html=_to_html(op_body),
     ), resend_key)
     logger.info("Sent plan to operator for pending_id=%s", pending_id)
 
@@ -350,7 +357,7 @@ async def _handle_operator_reply(parsed: dict, customer: dict):
             from_=bot_email,
             to=_bare_email(client_from),
             subject=f"Re: {client_subject}",
-            html=body_text.replace("\n", "<br>"),
+            html=_to_html(body_text),
             in_reply_to=pending.get("message_id") or None,
         ), resend_key)
 
