@@ -193,10 +193,11 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ## Out of Scope (V2)
 
-- Email bot (`src/email_bot.py`) — watches inbox, wraps MCP tools with email transport
 - `src/api/google_ads.py` — Google Ads API client
 - `schemas/google_campaign.schema.json`
 - Multi-account batch operations
+
+Note: Email bot promoted from V2 to Phase 14 (see below).
 
 ---
 
@@ -221,9 +222,7 @@ See `docs/decisions/004-unified-changeset.md` for full design.
 
 ## Deferred — SaaS Multi-Tenancy
 
-Phase 12 (customer registry, API key auth, GitHub API file storage, onboarding scripts) was scoped for a hosted-SaaS deployment model. The current ADR-driven architecture is local MCP server + bring-your-own-model. The right collaboration and tenancy design depends on the first real client integration — defer until that context exists.
-
-Reference: `docs/saas-architecture.md` for the original design.
+Phase 12 (customer registry, API key auth, GitHub API file storage, onboarding scripts) was scoped for a hosted-SaaS delivery model. Superseded by ADR-008 (contractor service model). Deferred until a real client integration establishes the right tenancy requirements.
 
 ---
 
@@ -232,3 +231,51 @@ Reference: `docs/saas-architecture.md` for the original design.
 - [x] Implement `get_campaign_export(account_id)` — fetch full campaign hierarchy from Facebook (campaigns + ad sets + ads) for a given account in a single MCP tool call; `get_campaign_status` returns campaign-level only
 - [x] BOM-tolerant JSON loading (ADR-007) — `load_campaign_json` changed to `encoding="utf-8-sig"`; BOM stripped from `demo_v1.json`
 - [x] Contractor service model and multi-tenant architecture documented (ADR-008) — one MCP server instance per customer, human review gate between plan and apply, state committed per customer repo
+
+---
+
+## Phase 13 — Per-Customer Config & State Structure (ADR-008)
+
+Implement the directory layout and server configurability described in ADR-008. Each customer gets their own isolated working directory with credentials, campaigns, and state.
+
+- [ ] **Define `config.json` format** — schema for per-customer config: `customer_slug`, `account_id`, `campaigns_dir`, `state_dir`; create `schemas/customer_config.schema.json`
+- [ ] **Update `mcp_server.py` to accept `--config <path>`** — load `config.json` at startup; derive `campaigns_dir`, `state_dir`, and `account_id` from it; fall back to current env-var defaults when flag is absent (backwards compatible)
+- [ ] **Update `StateFile.load` / `save` paths** — accept an explicit base directory so state resolves relative to the customer folder, not the repo root
+- [ ] **Create `customers/` directory with `demo/` scaffold** — move `campaigns/demo/` and `state/act_366643171197739.json` under `customers/demo/`; add `customers/demo/config.json` and `customers/demo/.env.example`
+- [ ] **Update `.gitignore`** — add `customers/*/.env` so per-customer credential files are never committed
+- [ ] **Write `scripts/new_customer.py`** — onboarding script: accepts `customer_slug` and `account_id`, creates `customers/{slug}/` directory scaffold, copies `.env.example`, prints next steps
+- [ ] **Update README** — replace current setup instructions with customer-centric workflow; document `--config` flag and `new_customer.py`
+- [ ] **Update tests** — pass explicit `state_dir` to `StateFile` in test fixtures; add test for `--config` startup path in `test_mcp_server.py`
+
+---
+
+## Phase 14 — Email Bot (`src/email_bot.py`)
+
+The client-facing interface for the contractor service model. Clients send media plans by email; the operator receives a plan for review; approved plans are applied to Facebook; clients receive confirmation. See ADR-008 for flow design.
+
+### Inbound handling
+
+- [ ] **Create `src/email_bot.py`** — main entry point; poll or listen for inbound email via Gmail API (IMAP fallback); dispatch each message through the pipeline
+- [ ] **Sender authentication** — match `From` address against `email_addresses` in customer config; reject unrecognized senders with a polite error reply; log rejections
+- [ ] **Attachment extraction** — detect Excel (`.xlsx`) attachments and save to a temp path for ingestion; fall back to plain-text body parsing if no attachment
+- [ ] **Brief parsing** — if no Excel attachment, pass email body to `ingest_excel` equivalent for plain-text briefs; extract campaign intent and flag ambiguities
+- [ ] **Ambiguity handling** — if ingestion returns ambiguities, reply to sender listing them before proceeding; require clarification before generating a plan
+
+### Plan-review gate (operator flow)
+
+- [ ] **Generate plan** — run `plan_campaigns` on ingested JSON; format output as a readable email
+- [ ] **Email operator with plan** — send plan to operator address with reply instructions: reply `GO` to apply, `HOLD` to discard, or quote-reply with edits
+- [ ] **Parse operator reply** — detect `GO` / `HOLD` keyword in reply subject or body; extract any JSON edits the operator quoted
+- [ ] **Apply on approval** — on `GO`, run `apply_campaigns` with the approved JSON; on `HOLD`, notify client that the brief is under review
+
+### Outbound confirmation
+
+- [ ] **Confirmation to client** — after successful apply, send client a summary: campaigns created/updated, any warnings, git commit hash as reference
+- [ ] **Error notification** — if apply fails, email operator with full error detail; send client a "we're looking into it" reply
+
+### Infrastructure
+
+- [ ] **Gmail API integration** — OAuth2 credentials for the operator inbox; store token in `customers/{slug}/.gmail_token` (gitignored); refresh automatically
+- [ ] **Create `src/services/email.py`** — send/receive helpers wrapping the Gmail API: `send_reply(to, subject, body, thread_id)`, `list_unread(label)`, `mark_read(message_id)`
+- [ ] **Polling loop** — run as a long-lived process; poll inbox every 60 seconds; process one message at a time per customer to avoid race conditions on state files
+- [ ] **Write `tests/test_email_bot.py`** — mock Gmail API; test sender auth, attachment extraction, plan generation, operator reply parsing, confirmation send; test `HOLD` path discards without applying
