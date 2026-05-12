@@ -107,9 +107,9 @@ async def test_apply_campaigns_no_changes_message(tmp_path):
     campaign = EXAMPLE_JSON["campaigns"][0]
     adset = campaign["ad_sets"][0]
     ad = adset["ads"][0]
-    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
-    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
-    state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad1", "cr1", {"name": ad["name"], "status": ad["status"]})
+    state.upsert_campaign(campaign["name"], campaign.get("fb_id", "c1"), {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
+    state.upsert_adset(campaign["name"], adset["name"], adset.get("fb_id", "a1"), {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
+    state.upsert_ad(campaign["name"], adset["name"], ad["name"], ad.get("fb_id", "ad1"), "cr1", {"name": ad["name"], "status": ad["status"]})
 
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
@@ -187,9 +187,9 @@ async def test_plan_campaigns_no_changes_message(tmp_path):
     campaign = EXAMPLE_JSON["campaigns"][0]
     adset = campaign["ad_sets"][0]
     ad = adset["ads"][0]
-    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
-    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
-    state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad1", "cr1", {"name": ad["name"], "status": ad["status"]})
+    state.upsert_campaign(campaign["name"], campaign.get("fb_id", "c1"), {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
+    state.upsert_adset(campaign["name"], adset["name"], adset.get("fb_id", "a1"), {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
+    state.upsert_ad(campaign["name"], adset["name"], ad["name"], ad.get("fb_id", "ad1"), "cr1", {"name": ad["name"], "status": ad["status"]})
 
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
