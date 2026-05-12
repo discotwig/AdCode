@@ -83,7 +83,7 @@ Instructions:
 2. For each campaign, create a complete JSON object matching the schema.
 3. Use "PAUSED" as the default status for all objects unless the Excel clearly indicates otherwise.
 4. If a required field is ambiguous or missing, use your best guess and record it as an ambiguity.
-5. The account_id should be taken from the Excel if present; otherwise use "act_000000000".
+5. Do NOT include account_id in your output and do NOT flag it as an ambiguity — it is supplied externally and will be set by the system.
 
 Respond with a JSON object with two keys:
 - "campaigns": array of campaign JSON objects matching the schema structure (just the array of campaign objects, not the top-level wrapper)
