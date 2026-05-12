@@ -250,6 +250,7 @@ async def _handle_inbound(parsed: dict, customer: dict):
         )
         consultant_prompt = AMBIGUITY_EMAIL.format(
             subject=subject,
+            campaigns_json=json.dumps(ingest_result.campaigns, indent=2),
             ambiguity_list=ambiguity_list,
         )
         amb_response = ai_client.messages.create(

@@ -105,6 +105,9 @@ that asks for the missing information in plain English.
 
 Brief subject: {subject}
 
+What we extracted so far (internal — use this to write the summary section):
+{campaigns_json}
+
 Gaps identified (internal notes — do not quote these verbatim):
 {ambiguity_list}
 
@@ -116,5 +119,9 @@ Rules:
 - Do not mention AI, automation, or that this was parsed from a spreadsheet.
 - End with a single friendly closing line asking them to reply with the answers.
 - Do not include a subject line or greeting — just the body text starting from the first sentence.
+- After the closing line, add a section headed "Here's what we have on file so far:" followed by
+  a plain-English bullet list summarising each campaign (name, objective, budget, targeting,
+  dates if present, status). This gives the client a chance to correct anything we got wrong,
+  and ensures the full picture is in the thread for our records.
 
 Return only the email body text, no other content."""
