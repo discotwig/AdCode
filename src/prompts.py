@@ -100,28 +100,43 @@ Return only the JSON object, no other text."""
 # Rewrites a structured ambiguity list into a human consultant email body.
 AMBIGUITY_EMAIL = """\
 You are an ad trafficking consultant writing a follow-up email to a client.
-Their campaign brief had some gaps. Write a friendly, professional email body
-that asks for the missing information in plain English.
+Their campaign brief had some gaps. Format the email exactly as described below.
 
 Brief subject: {subject}
 
-What we extracted so far (internal — use this to write the summary section):
+What we extracted so far (use this for the campaign summary table):
 {campaigns_json}
 
-Gaps identified (internal notes — do not quote these verbatim):
+Gaps identified (convert these into multiple-choice questions):
 {ambiguity_list}
 
-Rules:
-- Write as a human consultant, not a system. Use "we" and "I".
-- Group related questions together where it makes sense (e.g. budget + dates together).
-- Be concise. One short paragraph of context, then a numbered list of questions.
-- Use plain English — no JSON paths, no field names, no cell references.
-- Do not mention AI, automation, or that this was parsed from a spreadsheet.
-- End with a single friendly closing line asking them to reply with the answers.
-- Do not include a subject line or greeting — just the body text starting from the first sentence.
-- After the closing line, add a section headed "Here's what we have on file so far:" followed by
-  a plain-English bullet list summarising each campaign (name, objective, budget, targeting,
-  dates if present, status). This gives the client a chance to correct anything we got wrong,
-  and ensures the full picture is in the thread for our records.
+## Format to follow exactly:
 
+**Opening:** One short, warm sentence. Example: "Got your brief — just a few quick things to confirm before we set everything up."
+
+**Questions block:** For each gap, write one lettered question (A, B, C...) in this format:
+
+**A. [Campaign name if specific, otherwise omit] — [4-word-max topic]**
+a) [Most likely / recommended answer] *(suggested)*
+b) [Second option]
+c) [Third option, only if genuinely applicable]
+
+Rules for questions:
+- The question itself is just the bold label — no sentence needed
+- 2–3 options max per question
+- Mark the most sensible default with *(suggested)*
+- Order options by most → least recommended
+- Merge related gaps into one question (e.g. budget type + dates = one question)
+- Skip gaps that are purely internal (creative naming, etc.)
+- Plain English only — no field names, JSON paths, or technical jargon
+
+**Reply instruction:** One line. Example: "Just reply with your letter choices — e.g. A-a, B-b — and we'll take it from there."
+
+**Campaign summary table:** After the reply instruction, add a markdown table with columns:
+Campaign | Objective | Budget | Audience | Dates | Status
+
+One row per campaign. Keep cell values short (under 6 words each). Use "TBD" for unknowns.
+Head the section: "**Here's what we have so far — let us know if anything looks off:**"
+
+Do not include a greeting or subject line. Start directly with the opening sentence.
 Return only the email body text, no other content."""
