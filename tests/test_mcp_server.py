@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 from src.mcp_server import (
     _apply_campaigns, _plan_campaigns, _pause_campaigns,
     _get_local_state, _get_campaign_status, _get_drift_report,
-    _list_campaigns, _ingest_excel, _import_adsets, _find_duplicates, list_tools,
+    _list_campaigns, _ingest_excel, _import_adsets, _find_duplicates,
+    _get_campaign_export, list_tools,
 )
 from src.services.state import StateFile
 
@@ -493,6 +494,49 @@ async def test_list_tools_includes_import_adsets():
 # ------------------------------------------------------------------
 # find_duplicates
 # ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# get_campaign_export
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_campaign_export_returns_full_hierarchy():
+    meta = _make_meta_client()
+    actuals = {
+        "Summer Sale": {
+            "fb_id": "camp_001",
+            "id": "camp_001",
+            "name": "Summer Sale",
+            "status": "ACTIVE",
+            "ad_sets": {
+                "Broad Audience": {
+                    "fb_id": "adset_001",
+                    "name": "Broad Audience",
+                    "status": "ACTIVE",
+                    "ads": {
+                        "Ad A": {"fb_id": "ad_001", "name": "Ad A", "status": "ACTIVE"},
+                    },
+                },
+            },
+        }
+    }
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.fetch_actuals", return_value=actuals)):
+        result = await _get_campaign_export({"account_id": "act_123"})
+    data = json.loads(result[0].text)
+    assert "Summer Sale" in data
+    assert "Broad Audience" in data["Summer Sale"]["ad_sets"]
+    assert "Ad A" in data["Summer Sale"]["ad_sets"]["Broad Audience"]["ads"]
+
+
+@pytest.mark.asyncio
+async def test_get_campaign_export_calls_fetch_actuals():
+    meta = _make_meta_client()
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.fetch_actuals", return_value={}) as mock_fetch):
+        await _get_campaign_export({"account_id": "act_123"})
+    mock_fetch.assert_called_once_with("act_123", meta)
+
 
 @pytest.mark.asyncio
 async def test_find_duplicates_returns_duplicates():

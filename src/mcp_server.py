@@ -219,6 +219,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_campaign_export",
+            description=(
+                "Fetch the full campaign hierarchy from Facebook for an ad account — "
+                "campaigns, ad sets, and ads in a single nested response. "
+                "Always calls the live Facebook API. "
+                "Use this to get a complete snapshot of everything in the account, "
+                "including objects not tracked in the local state file."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["account_id"],
+                "properties": {
+                    "account_id": {
+                        "type": "string",
+                        "description": "Ad account ID (e.g. act_366643171197739).",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="find_duplicates",
             description=(
                 "Find campaigns with duplicate names in the Facebook Ad Account. "
@@ -264,6 +284,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _ingest_excel(arguments)
         elif name == "import_adsets":
             return await _import_adsets(arguments)
+        elif name == "get_campaign_export":
+            return await _get_campaign_export(arguments)
         elif name == "find_duplicates":
             return await _find_duplicates(arguments)
         else:
@@ -510,6 +532,13 @@ async def _import_adsets(args: dict) -> list[TextContent]:
             lines.append(f"  - {s}")
     lines.extend(["", "Run plan_campaigns to verify no spurious changes before committing."])
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _get_campaign_export(args: dict) -> list[TextContent]:
+    account_id = args["account_id"]
+    meta = _get_meta_client()
+    actuals = fetch_actuals(account_id, meta)
+    return [TextContent(type="text", text=json.dumps(actuals, indent=2))]
 
 
 async def _find_duplicates(args: dict) -> list[TextContent]:
