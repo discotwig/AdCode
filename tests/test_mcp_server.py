@@ -1,12 +1,12 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from src.mcp_server import (
-    _push_campaigns, _pause_campaigns, _get_campaign_json,
-    _get_campaign_status, _get_drift_report, _validate_campaigns,
-    _preview_diff, _ingest_excel, list_tools,
+    _apply_campaigns, _plan_campaigns, _pause_campaigns,
+    _get_local_state, _get_campaign_status, _get_drift_report,
+    _list_campaigns, _ingest_excel, list_tools,
 )
 from src.services.state import StateFile
 
@@ -52,72 +52,177 @@ with open(EXAMPLE_PATH) as _f:
 async def test_list_tools_returns_all_tools():
     tools = await list_tools()
     names = {t.name for t in tools}
-    assert "push_campaigns" in names
+    assert "apply_campaigns" in names
+    assert "plan_campaigns" in names
+    assert "list_campaigns" in names
     assert "pause_campaigns" in names
-    assert "get_campaign_json" in names
+    assert "get_local_state" in names
     assert "get_campaign_status" in names
     assert "get_drift_report" in names
-    assert "validate_campaigns" in names
-    assert "preview_diff" in names
     assert "ingest_excel" in names
+
+
+@pytest.mark.asyncio
+async def test_list_tools_no_retired_tools():
+    tools = await list_tools()
+    names = {t.name for t in tools}
+    assert "push_campaigns" not in names
+    assert "get_campaign_json" not in names
+    assert "validate_campaigns" not in names
+    assert "preview_diff" not in names
     assert "preview_teardown" not in names
     assert "teardown_campaigns" not in names
 
 
 # ------------------------------------------------------------------
-# push_campaigns
+# apply_campaigns
 # ------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_push_campaigns_applies_when_valid(tmp_path):
+async def test_apply_campaigns_applies_when_valid(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _push_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
     text = result[0].text
-    assert "Push complete" in text or "No changes" in text
+    assert "Applied" in text or "No changes" in text
 
 
 @pytest.mark.asyncio
-async def test_push_campaigns_blocked_when_policy_error(tmp_path):
+async def test_apply_campaigns_blocked_when_policy_error(tmp_path):
     policy_warnings = [{"severity": "ERROR", "field": "x", "message": "Prohibited", "suggestion": "Fix"}]
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client(policy_warnings)),
           patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _push_campaigns({"json_path": EXAMPLE_PATH})
-    text = result[0].text
-    assert "blocked" in text.lower()
+        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+    assert "blocked" in result[0].text.lower()
 
 
 @pytest.mark.asyncio
-async def test_push_campaigns_validates_before_applying(tmp_path):
-    meta = _make_meta_client()
-    with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
-          patch("src.services.state.STATE_DIR", tmp_path)):
-        await _push_campaigns({"json_path": EXAMPLE_PATH})
-
-
-@pytest.mark.asyncio
-async def test_push_campaigns_no_changes_message(tmp_path):
-    # Pre-populate state so no changes are needed
+async def test_apply_campaigns_no_changes_message(tmp_path):
     state = StateFile(EXAMPLE_JSON["account_id"])
     campaign = EXAMPLE_JSON["campaigns"][0]
     adset = campaign["ad_sets"][0]
     ad = adset["ads"][0]
-    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name","objective","status","special_ad_categories"]})
-    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name","status","billing_event","optimization_goal","daily_budget"]})
+    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
+    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
     state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad1", "cr1", {"name": ad["name"], "status": ad["status"]})
 
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _push_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
     assert "No changes" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_apply_campaigns_returns_plan_when_deletes_without_confirm(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+    text = result[0].text
+    assert "confirm_deletes" in text
+    assert "DELETE" in text.upper()
+
+
+@pytest.mark.asyncio
+async def test_apply_campaigns_executes_deletes_with_confirm(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
+    meta = _make_meta_client()
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _apply_campaigns({"json_path": EXAMPLE_PATH, "confirm_deletes": True})
+    assert "Applied" in result[0].text
+    meta.delete_campaign.assert_called_with("stale_001")
+
+
+# ------------------------------------------------------------------
+# plan_campaigns
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_plan_campaigns_does_not_call_apply(tmp_path):
+    meta = _make_meta_client()
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+    meta.create_campaign.assert_not_called()
+    meta.update_campaign.assert_not_called()
+    meta.delete_campaign.assert_not_called()
+    assert len(result[0].text) > 0
+
+
+@pytest.mark.asyncio
+async def test_plan_campaigns_includes_validation_and_diff(tmp_path):
+    meta = _make_meta_client()
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+    text = result[0].text
+    # Should contain both validation summary and diff
+    assert "Pushable" in text or "blocked" in text.lower()
+    assert "CreateCampaign" in text or "No changes" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_campaigns_no_changes_message(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    campaign = EXAMPLE_JSON["campaigns"][0]
+    adset = campaign["ad_sets"][0]
+    ad = adset["ads"][0]
+    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]})
+    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]})
+    state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad1", "cr1", {"name": ad["name"], "status": ad["status"]})
+
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+    assert "No changes" in result[0].text
+
+
+# ------------------------------------------------------------------
+# list_campaigns
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_campaigns_calls_facebook_api():
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = [
+        {"id": "123", "name": "Test Campaign", "status": "PAUSED", "objective": "REACH"},
+    ]
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = await _list_campaigns({})
+    meta.list_campaigns.assert_called_once()
+    assert "Test Campaign" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_list_campaigns_never_reads_state():
+    meta = _make_meta_client()
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.StateFile.load") as mock_state_load,
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        await _list_campaigns({})
+    mock_state_load.assert_not_called()
 
 
 # ------------------------------------------------------------------
@@ -126,12 +231,12 @@ async def test_push_campaigns_no_changes_message(tmp_path):
 
 @pytest.mark.asyncio
 async def test_pause_campaigns_pauses_matching(tmp_path):
-    state = StateFile("act_123")
-    state.upsert_campaign("Summer Sale", "camp_001", {"name": "Summer Sale", "status": "ACTIVE"})
     meta = _make_meta_client()
-
+    meta.list_campaigns.return_value = [
+        {"id": "camp_001", "name": "Summer Sale", "status": "ACTIVE"},
+    ]
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
         result = await _pause_campaigns({"campaign_name": "Summer Sale", "account_id": "act_123"})
@@ -141,41 +246,72 @@ async def test_pause_campaigns_pauses_matching(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pause_campaigns_skips_already_paused(tmp_path):
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = [
+        {"id": "camp_001", "name": "Summer Sale", "status": "PAUSED"},
+    ]
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.services.state.STATE_DIR", tmp_path),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = await _pause_campaigns({"campaign_name": "Summer Sale", "account_id": "act_123"})
+
+    meta.pause_campaign.assert_not_called()
+    assert "already paused" in result[0].text
+
+
+@pytest.mark.asyncio
 async def test_pause_campaigns_no_match_message(tmp_path):
-    state = StateFile("act_123")
-    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
-          patch("src.mcp_server.StateFile.load", return_value=state),
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = [
+        {"id": "camp_001", "name": "Summer Sale", "status": "ACTIVE"},
+    ]
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
         result = await _pause_campaigns({"campaign_name": "Nonexistent", "account_id": "act_123"})
     assert "No matching" in result[0].text
 
 
+@pytest.mark.asyncio
+async def test_pause_campaigns_queries_facebook_not_state(tmp_path):
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = []
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.services.state.STATE_DIR", tmp_path),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        await _pause_campaigns({"account_id": "act_123"})
+    meta.list_campaigns.assert_called_once()
+
+
 # ------------------------------------------------------------------
-# get_campaign_json
+# get_local_state
 # ------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_campaign_json_returns_state_data(tmp_path):
+async def test_get_local_state_returns_state_data():
     state = StateFile("act_123")
     state.upsert_campaign("Summer Sale", "camp_001", {"name": "Summer Sale"})
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _get_campaign_json({"account_id": "act_123"})
+        result = await _get_local_state({"account_id": "act_123"})
 
     assert "Summer Sale" in result[0].text
 
 
 @pytest.mark.asyncio
-async def test_get_campaign_json_filters_by_name(tmp_path):
+async def test_get_local_state_filters_by_name():
     state = StateFile("act_123")
     state.upsert_campaign("Summer Sale", "camp_001", {})
     state.upsert_campaign("Winter Promo", "camp_002", {})
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _get_campaign_json({"account_id": "act_123", "campaign_name": "summer"})
+        result = await _get_local_state({"account_id": "act_123", "campaign_name": "summer"})
 
     text = result[0].text
     assert "Summer Sale" in text
@@ -183,13 +319,13 @@ async def test_get_campaign_json_filters_by_name(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_campaign_json_does_not_call_meta_api():
+async def test_get_local_state_does_not_call_meta_api():
     state = StateFile("act_123")
     meta = _make_meta_client()
     with (patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server._get_meta_client", return_value=meta),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        await _get_campaign_json({})
+        await _get_local_state({})
     meta.list_campaigns.assert_not_called()
     meta.get_campaign.assert_not_called()
 
@@ -219,80 +355,3 @@ async def test_get_drift_report_returns_report():
           patch("src.mcp_server.StateFile.load", return_value=state)):
         result = await _get_drift_report({"account_id": "act_123"})
     assert len(result[0].text) > 0
-
-
-# ------------------------------------------------------------------
-# validate_campaigns
-# ------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_validate_campaigns_returns_summary(tmp_path):
-    with patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()):
-        result = await _validate_campaigns({"json_path": EXAMPLE_PATH})
-    assert "Pushable" in result[0].text
-
-
-# ------------------------------------------------------------------
-# preview_diff
-# ------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_preview_diff_does_not_call_apply(tmp_path):
-    meta = _make_meta_client()
-    state = StateFile(EXAMPLE_JSON["account_id"])
-    with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server.StateFile.load", return_value=state),
-          patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _preview_diff({"json_path": EXAMPLE_PATH})
-    meta.create_campaign.assert_not_called()
-    assert len(result[0].text) > 0
-
-
-@pytest.mark.asyncio
-async def test_preview_diff_no_changes_message(tmp_path):
-    state = StateFile(EXAMPLE_JSON["account_id"])
-    campaign = EXAMPLE_JSON["campaigns"][0]
-    adset = campaign["ad_sets"][0]
-    ad = adset["ads"][0]
-    state.upsert_campaign(campaign["name"], "c1", {k: campaign[k] for k in ["name","objective","status","special_ad_categories"]})
-    state.upsert_adset(campaign["name"], adset["name"], "a1", {k: adset[k] for k in ["name","status","billing_event","optimization_goal","daily_budget"]})
-    state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad1", "cr1", {"name": ad["name"], "status": ad["status"]})
-
-    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
-          patch("src.mcp_server.StateFile.load", return_value=state),
-          patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _preview_diff({"json_path": EXAMPLE_PATH})
-    assert "No changes" in result[0].text
-
-
-# ------------------------------------------------------------------
-# push_campaigns — confirm_deletes guard
-# ------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_push_campaigns_returns_plan_when_deletes_without_confirm(tmp_path):
-    state = StateFile(EXAMPLE_JSON["account_id"])
-    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
-    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
-          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-          patch("src.mcp_server.StateFile.load", return_value=state),
-          patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _push_campaigns({"json_path": EXAMPLE_PATH})
-    text = result[0].text
-    assert "confirm_deletes" in text
-    assert "DELETE" in text.upper()
-
-
-@pytest.mark.asyncio
-async def test_push_campaigns_executes_deletes_with_confirm(tmp_path):
-    state = StateFile(EXAMPLE_JSON["account_id"])
-    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
-    meta = _make_meta_client()
-    with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-          patch("src.mcp_server.StateFile.load", return_value=state),
-          patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _push_campaigns({"json_path": EXAMPLE_PATH, "confirm_deletes": True})
-    text = result[0].text
-    assert "Push complete" in text
-    meta.delete_campaign.assert_called_with("stale_001")

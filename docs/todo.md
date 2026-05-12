@@ -173,7 +173,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - Test `get_campaign_json` returns correct state data
   - Test `preview_diff` returns plan without calling apply
   - All tests use mocked `MetaClient` and mocked AI client
-- [ ] Update `tests/test_mcp_server.py` to reflect renamed tools (`apply_campaigns`, `plan_campaigns`, `get_local_state`, `list_campaigns`)
+- [x] Update `tests/test_mcp_server.py` to reflect renamed tools (`apply_campaigns`, `plan_campaigns`, `get_local_state`, `list_campaigns`)
 
 ---
 
