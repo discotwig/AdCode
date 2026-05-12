@@ -116,23 +116,33 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_campaign_status",
-            description="Fetch live status from Facebook for a single campaign.",
+            description=(
+                "Fetch live fields for a single campaign directly from Facebook by ID. "
+                "Returns status, effective_status, objective, and budget fields. "
+                "Use list_campaigns first if you don't already have the campaign ID."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["campaign_id"],
                 "properties": {
-                    "campaign_id": {"type": "string"},
+                    "campaign_id": {"type": "string", "description": "Facebook campaign ID (e.g. 120244515578050719)."},
                 },
             },
         ),
         Tool(
             name="get_drift_report",
-            description="Diff the state file against Facebook actuals and report any divergence.",
+            description=(
+                "Compare the local state file to live Facebook data and report any divergence. "
+                "Detects: objects in state that no longer exist on Facebook (deleted externally), "
+                "objects on Facebook not tracked in state (created outside AdCode), "
+                "and field mismatches (edited manually in Ads Manager). "
+                "Does not make any changes — read-only."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["account_id"],
                 "properties": {
-                    "account_id": {"type": "string"},
+                    "account_id": {"type": "string", "description": "Ad account ID (e.g. act_366643171197739)."},
                 },
             },
         ),
@@ -170,7 +180,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="ingest_excel",
-            description="Extract campaign JSON from an Excel file using AI. Returns extracted campaigns and a list of ambiguities for human review.",
+            description=(
+                "Extract campaign JSON from an Excel brief using AI. "
+                "Reads all sheets, maps rows to the campaign JSON schema, and flags anything ambiguous for human review. "
+                "Returns extracted campaign JSON plus an ambiguity report. "
+                "Commit the resulting JSON after reviewing — do not re-ingest from Excel once the JSON is committed."
+            ),
             inputSchema={
                 "type": "object",
                 "required": ["excel_path"],

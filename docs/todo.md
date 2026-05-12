@@ -157,13 +157,14 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - Register all tools (see below)
   - `main()` — start the MCP server on stdio transport
 
-- [x] Implement MCP tool: `push_campaigns`
+- [x] Implement MCP tool: `plan_campaigns` (validate + diff, replaces `validate_campaigns` + `preview_diff`)
+- [x] Implement MCP tool: `apply_campaigns` (replaces `push_campaigns`)
+- [x] Implement MCP tool: `list_campaigns` (live Facebook fetch)
 - [x] Implement MCP tool: `pause_campaigns`
-- [x] Implement MCP tool: `get_campaign_json`
+- [x] Implement MCP tool: `get_local_state` (replaces `get_campaign_json`)
 - [x] Implement MCP tool: `get_campaign_status`
 - [x] Implement MCP tool: `get_drift_report`
-- [x] Implement MCP tool: `validate_campaigns`
-- [x] Implement MCP tool: `preview_diff`
+- [x] Implement MCP tool: `ingest_excel`
 
 - [x] Write `tests/test_mcp_server.py`
   - Test each tool is registered and callable
@@ -172,6 +173,7 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
   - Test `get_campaign_json` returns correct state data
   - Test `preview_diff` returns plan without calling apply
   - All tests use mocked `MetaClient` and mocked AI client
+- [ ] Update `tests/test_mcp_server.py` to reflect renamed tools (`apply_campaigns`, `plan_campaigns`, `get_local_state`, `list_campaigns`)
 
 ---
 
@@ -205,8 +207,8 @@ See `docs/decisions/004-unified-changeset.md` for full design.
 - [x] **Add delete operation types to `src/traffic.py`** — add `DeleteCampaign`, `DeleteAdSet`, `DeleteAd` dataclasses alongside the existing create/update types
 - [x] **Extend `plan()` in `src/traffic.py`** — after computing creates/updates, iterate over state file entries not present in the JSON and emit delete ops (using fb_ids from state, not name-matching Facebook)
 - [x] **Extend `apply()` in `src/traffic.py`** — execute delete ops leaf-first (ads → ad sets → campaigns) using `MetaClient.delete_*`; remove deleted entries from the state file and save
-- [x] **Update `preview_diff` MCP tool** — surface delete ops in the plan output alongside creates and updates; format clearly (e.g. `DELETE campaign "X" (fb_id: 123)`)
-- [x] **Update `push_campaigns` MCP tool** — if the plan contains deletes, return the plan and require `confirm_deletes=true` before applying; if no deletes, apply immediately as today
+- [x] **Update `plan_campaigns` MCP tool** — surface delete ops in the plan output alongside creates and updates; format clearly (e.g. `DELETE campaign "X" (fb_id: 123)`)
+- [x] **Update `apply_campaigns` MCP tool** — if the plan contains deletes, return the plan and require `confirm_deletes=true` before applying; if no deletes, apply immediately as today
 - [x] **Remove `preview_teardown` and `teardown_campaigns` MCP tools** from `mcp_server.py`
 - [x] **Delete `src/services/teardown.py`** — logic is now absorbed into `traffic.py`
 - [x] **Update `tests/test_traffic.py`** — add tests for delete ops in `plan()` (state entries absent from JSON produce deletes) and `apply()` (deletes execute leaf-first, state file entries are removed)

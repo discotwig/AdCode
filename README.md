@@ -12,14 +12,14 @@ AdCode follows the same model as AWS CloudFormation or Terraform:
 |---|---|
 | Template | Campaign JSON file (`campaigns/<slug>/<account>/file.json`) |
 | Stack state | `state/<account>.json` — maps every managed object to its Facebook ID |
-| Changeset | `preview_diff` output — creates, updates, and deletes shown together |
-| Apply | `push_campaigns` — makes Facebook match the JSON, then updates the state file |
+| Changeset | `plan_campaigns` output — validates + shows creates, updates, and deletes |
+| Apply | `apply_campaigns` — makes Facebook match the JSON, then updates the state file |
 
 **The full lifecycle in four steps:**
 
 1. **Define** — write or edit a campaign JSON file. Add a campaign to create it. Change a field to update it. Remove a campaign to delete it.
-2. **Preview** — run `preview_diff` to see the exact changeset before any API call is made. Deletions are called out explicitly and require confirmation to apply.
-3. **Apply** — run `push_campaigns`. Creates, updates, and deletes are applied in a single operation. The state file in Git is updated to reflect what's live.
+2. **Plan** — run `plan_campaigns` to validate the file and see the exact changeset before any API call is made. Deletions are called out explicitly and require confirmation to apply.
+3. **Apply** — run `apply_campaigns`. Creates, updates, and deletes are applied in a single operation. The state file in Git is updated to reflect what's live.
 4. **Audit** — run `get_drift_report` to detect if anyone made manual changes in Ads Manager that diverge from the state file.
 
 The core scripts are exposed as MCP tools. Connect your model (Gemini, Claude, etc.) to the MCP server and interact via natural language.
@@ -55,14 +55,14 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 
 | Tool | Description |
 | --- | --- |
-| `push_campaigns(json_path, confirm_deletes?)` | Validate and apply a campaign JSON file to Facebook — creates, updates, and deletes. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
-| `pause_campaigns(filter)` | Pause campaigns matching a name or account filter |
-| `get_campaign_json(filter?)` | Return raw state file JSON for inspection — read-only, no API calls |
-| `get_campaign_status(campaign_id)` | Fetch live status from Facebook for a single campaign |
-| `get_drift_report(account_id)` | Diff state file against Facebook actuals; report any divergence |
-| `validate_campaigns(json_path)` | Run schema + AI policy validation without pushing |
-| `preview_diff(json_path)` | Show the full changeset (creates, updates, and deletes) without making any changes |
-| `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI |
+| `plan_campaigns(json_path)` | Validate a campaign JSON file and show the full changeset (creates, updates, deletes) — no changes made to Facebook. Always run before `apply_campaigns` |
+| `apply_campaigns(json_path, confirm_deletes?)` | Apply a campaign JSON file to Facebook — creates, updates, and deletes. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
+| `list_campaigns(account_id?)` | Fetch all campaigns directly from Facebook — always live, never from the local state file |
+| `pause_campaigns(filter)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly, works for campaigns not tracked in state |
+| `get_campaign_status(campaign_id)` | Fetch live fields for a single campaign from Facebook by ID |
+| `get_drift_report(account_id)` | Compare local state to live Facebook data; report objects missing, untracked, or field-mismatched |
+| `get_local_state(filter?)` | Read the local state file (cache) — shows what AdCode last recorded after a push, not live Facebook state |
+| `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI; flags ambiguities for human review |
 
 ## Repository layout
 
