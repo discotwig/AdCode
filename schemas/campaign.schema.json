@@ -27,14 +27,27 @@
         "name": { "type": "string", "minLength": 1 },
         "objective": {
           "type": "string",
-          "description": "Immutable after creation.",
+          "description": "Immutable after creation. OUTCOME_* values are current API; legacy values (REACH, PAGE_LIKES, LINK_CLICKS, etc.) are accepted for existing campaigns imported from Facebook.",
           "enum": [
             "OUTCOME_TRAFFIC",
             "OUTCOME_AWARENESS",
             "OUTCOME_ENGAGEMENT",
             "OUTCOME_LEADS",
             "OUTCOME_SALES",
-            "OUTCOME_APP_PROMOTION"
+            "OUTCOME_APP_PROMOTION",
+            "REACH",
+            "PAGE_LIKES",
+            "LINK_CLICKS",
+            "POST_ENGAGEMENT",
+            "VIDEO_VIEWS",
+            "CONVERSIONS",
+            "APP_INSTALLS",
+            "LEAD_GENERATION",
+            "BRAND_AWARENESS",
+            "LOCAL_AWARENESS",
+            "PRODUCT_CATALOG_SALES",
+            "STORE_VISITS",
+            "MESSAGES"
           ]
         },
         "status": {
@@ -61,7 +74,6 @@
         },
         "ad_sets": {
           "type": "array",
-          "minItems": 1,
           "items": { "$ref": "#/definitions/ad_set" }
         }
       }
@@ -85,10 +97,14 @@
           "type": "string",
           "enum": ["IMPRESSIONS", "REACH", "LINK_CLICKS", "LANDING_PAGE_VIEWS", "LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "VALUE", "APP_INSTALLS", "PAGE_ENGAGEMENT", "THRUPLAY", "CONVERSATIONS"]
         },
+        "bid_strategy": {
+          "type": "string",
+          "enum": ["LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "MINIMUM_ROAS"]
+        },
         "bid_amount": {
           "type": "integer",
           "minimum": 1,
-          "description": "Manual bid cap in account currency cents. Omit for automatic bidding."
+          "description": "Manual bid cap in account currency cents. Required when bid_strategy is LOWEST_COST_WITH_BID_CAP."
         },
         "daily_budget": {
           "type": "integer",

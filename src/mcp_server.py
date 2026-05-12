@@ -62,25 +62,32 @@ def _resolve_campaign_json(json_path: str | None, json_str: str | None) -> dict:
 async def list_tools() -> list[Tool]:
     return [
         Tool(
-            name="push_campaigns",
+            name="apply_campaigns",
             description=(
-                "Validate, diff, and apply a campaign JSON file to Facebook. "
-                "Creates, updates, AND deletes objects so Facebook matches the file exactly. "
-                "If the plan includes deletions, returns the plan and requires confirm_deletes=true to proceed. "
-                "Aborts if validation produces blocking errors."
+                "Apply a campaign JSON file to Facebook — creates, updates, and deletes objects "
+                "so Facebook matches the file exactly. "
+                "Run plan_campaigns first to review what will change. "
+                "Blocked if validation finds errors. "
+                "If the plan includes deletions, returns the plan and waits for confirm_deletes=true "
+                "before proceeding — call again with that flag set to confirm."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "json_path": {"type": "string", "description": "Path to campaign JSON file in the repo."},
                     "json_str": {"type": "string", "description": "Inline campaign JSON string."},
-                    "confirm_deletes": {"type": "boolean", "description": "Set true to apply a plan that includes deletions."},
+                    "confirm_deletes": {"type": "boolean", "description": "Set true to proceed when the plan includes deletions."},
                 },
             },
         ),
         Tool(
             name="pause_campaigns",
-            description="Pause campaigns matching a name or account filter.",
+            description=(
+                "Pause campaigns on Facebook matching a name or ID filter. "
+                "Queries Facebook directly for the current campaign list — "
+                "works even for campaigns not tracked in the local state file. "
+                "Already-paused campaigns are reported but not re-paused."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -91,8 +98,14 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_campaign_json",
-            description="Return raw state file JSON for one or more campaigns. Read-only; never calls the Facebook API.",
+            name="get_local_state",
+            description=(
+                "Read campaigns from the local state file (cache). "
+                "Never calls the Facebook API — returns what AdCode last recorded after a push. "
+                "Use this to inspect tracked configuration or fb_ids. "
+                "Do NOT use this to answer questions about what currently exists on Facebook; "
+                "use list_campaigns for that."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -124,24 +137,34 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="validate_campaigns",
-            description="Run schema and AI policy validation without pushing. Returns a structured report.",
+            name="plan_campaigns",
+            description=(
+                "Validate a campaign JSON file and show the full changeset that apply_campaigns would execute — "
+                "no changes are made to Facebook. "
+                "Returns schema and AI policy validation results plus a diff of creates, updates, and deletes. "
+                "Always run this before apply_campaigns."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "json_path": {"type": "string"},
-                    "json_str": {"type": "string"},
+                    "json_path": {"type": "string", "description": "Path to campaign JSON file in the repo."},
+                    "json_str": {"type": "string", "description": "Inline campaign JSON string."},
                 },
             },
         ),
         Tool(
-            name="preview_diff",
-            description="Show the full changeset (creates, updates, and deletes) without making any changes.",
+            name="list_campaigns",
+            description=(
+                "Fetch all campaigns directly from Facebook for a given ad account. "
+                "Always calls the live Facebook API — never reads from the local state file. "
+                "Use this to see what actually exists on Facebook, including campaigns that "
+                "were created outside of AdCode or are not tracked in state. "
+                "Returns id, name, objective, status, and effective_status for each campaign."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "json_path": {"type": "string"},
-                    "json_str": {"type": "string"},
+                    "account_id": {"type": "string", "description": "Ad account ID (e.g. act_123). Defaults to FB_ACCOUNT_ID env var."},
                 },
             },
         ),
@@ -166,20 +189,20 @@ async def list_tools() -> list[Tool]:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
-        if name == "push_campaigns":
-            return await _push_campaigns(arguments)
+        if name == "apply_campaigns":
+            return await _apply_campaigns(arguments)
+        elif name == "plan_campaigns":
+            return await _plan_campaigns(arguments)
         elif name == "pause_campaigns":
             return await _pause_campaigns(arguments)
-        elif name == "get_campaign_json":
-            return await _get_campaign_json(arguments)
+        elif name == "get_local_state":
+            return await _get_local_state(arguments)
         elif name == "get_campaign_status":
             return await _get_campaign_status(arguments)
         elif name == "get_drift_report":
             return await _get_drift_report(arguments)
-        elif name == "validate_campaigns":
-            return await _validate_campaigns(arguments)
-        elif name == "preview_diff":
-            return await _preview_diff(arguments)
+        elif name == "list_campaigns":
+            return await _list_campaigns(arguments)
         elif name == "ingest_excel":
             return await _ingest_excel(arguments)
         else:
@@ -210,13 +233,28 @@ def _format_plan(p) -> str:
     return "\n".join(lines)
 
 
-async def _push_campaigns(args: dict) -> list[TextContent]:
+async def _plan_campaigns(args: dict) -> list[TextContent]:
+    campaign_json = _resolve_campaign_json(args.get("json_path"), args.get("json_str"))
+    ai_client = _get_ai_client()
+    validation = validate_all(campaign_json, ai_client)
+
+    meta = _get_meta_client()
+    account_id = campaign_json["account_id"]
+    state = StateFile.load(account_id)
+    p = plan(campaign_json, state, meta)
+
+    diff_section = _format_plan(p) if len(p) > 0 else "No changes — Facebook already matches this configuration."
+    lines = [validation.summary(), "", diff_section]
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _apply_campaigns(args: dict) -> list[TextContent]:
     campaign_json = _resolve_campaign_json(args.get("json_path"), args.get("json_str"))
     ai_client = _get_ai_client()
     validation = validate_all(campaign_json, ai_client)
 
     if not validation.is_pushable:
-        return [TextContent(type="text", text=f"Push blocked by validation.\n\n{validation.summary()}")]
+        return [TextContent(type="text", text=f"Blocked by validation.\n\n{validation.summary()}")]
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
@@ -235,29 +273,34 @@ async def _push_campaigns(args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=msg)]
 
     result = apply_plan(p, meta, state)
-    lines = [validation.summary(), "", f"Push complete: {result.summary()}"]
+    lines = [validation.summary(), "", f"Applied: {result.summary()}"]
     return [TextContent(type="text", text="\n".join(lines))]
 
 
 async def _pause_campaigns(args: dict) -> list[TextContent]:
     meta = _get_meta_client()
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
-    state = StateFile.load(account_id)
-
-    paused = []
     campaign_name = args.get("campaign_name")
     campaign_id_filter = args.get("campaign_id")
 
-    for cname, cdata in state.campaigns().items():
+    live_campaigns = meta.list_campaigns(account_id)
+
+    paused = []
+    state = StateFile.load(account_id)
+
+    for c in live_campaigns:
+        fb_id = c["id"]
+        cname = c["name"]
         if campaign_name and campaign_name.lower() not in cname.lower():
             continue
-        fb_id = cdata.get("fb_id")
         if campaign_id_filter and fb_id != campaign_id_filter:
             continue
-        if fb_id:
-            meta.pause_campaign(fb_id)
-            state.upsert_campaign(cname, fb_id, {**cdata.get("params", {}), "status": "PAUSED"})
-            paused.append(f"{cname} ({fb_id})")
+        if c.get("status") == "PAUSED":
+            paused.append(f"{cname} ({fb_id}) — already paused")
+            continue
+        meta.pause_campaign(fb_id)
+        state.upsert_campaign(cname, fb_id, {**c, "status": "PAUSED"})
+        paused.append(f"{cname} ({fb_id})")
 
     if paused:
         state.save()
@@ -265,7 +308,7 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text="No matching campaigns found.")]
 
 
-async def _get_campaign_json(args: dict) -> list[TextContent]:
+async def _get_local_state(args: dict) -> list[TextContent]:
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
     campaign_name_filter = args.get("campaign_name", "").lower()
     state = StateFile.load(account_id)
@@ -296,24 +339,13 @@ async def _get_drift_report(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text=format_report(report))]
 
 
-async def _validate_campaigns(args: dict) -> list[TextContent]:
-    campaign_json = _resolve_campaign_json(args.get("json_path"), args.get("json_str"))
-    ai_client = _get_ai_client()
-    result = validate_all(campaign_json, ai_client)
-    return [TextContent(type="text", text=result.summary())]
 
 
-async def _preview_diff(args: dict) -> list[TextContent]:
-    campaign_json = _resolve_campaign_json(args.get("json_path"), args.get("json_str"))
+async def _list_campaigns(args: dict) -> list[TextContent]:
     meta = _get_meta_client()
-    account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id)
-    p = plan(campaign_json, state, meta)
-
-    if len(p) == 0:
-        return [TextContent(type="text", text="No changes. State matches desired configuration.")]
-
-    return [TextContent(type="text", text=_format_plan(p))]
+    account_id = args.get("account_id") or os.environ.get("FB_ACCOUNT_ID", "")
+    campaigns = meta.list_campaigns(account_id)
+    return [TextContent(type="text", text=json.dumps(campaigns, indent=2))]
 
 
 async def _ingest_excel(args: dict) -> list[TextContent]:

@@ -34,11 +34,13 @@ def _with_retry(fn, *args, **kwargs):
             time.sleep(wait)
     raise last_exc
 
-CAMPAIGN_FIELDS = ["id", "name", "objective", "status", "special_ad_categories", "spend_cap", "daily_budget"]
-ADSET_FIELDS = ["id", "name", "campaign_id", "status", "targeting", "billing_event",
+CAMPAIGN_FIELDS = ["id", "name", "objective", "status", "effective_status", "special_ad_categories", "spend_cap", "daily_budget"]
+ADSET_FIELDS = ["id", "name", "campaign_id", "status", "effective_status", "targeting", "billing_event",
                 "optimization_goal", "bid_amount", "daily_budget", "lifetime_budget",
                 "start_time", "end_time"]
-AD_FIELDS = ["id", "name", "adset_id", "status", "creative"]
+AD_FIELDS = ["id", "name", "adset_id", "status", "effective_status", "creative"]
+
+_ALL_EFFECTIVE_STATUSES = ["ACTIVE", "PAUSED", "ARCHIVED", "IN_PROCESS", "WITH_ISSUES"]
 
 
 class MetaClient:
@@ -83,7 +85,8 @@ class MetaClient:
 
     def list_campaigns(self, account_id: str | None = None) -> list[dict]:
         account = AdAccount(account_id) if account_id else self._account
-        campaigns = _with_retry(account.get_campaigns, fields=CAMPAIGN_FIELDS)
+        campaigns = _with_retry(account.get_campaigns, fields=CAMPAIGN_FIELDS,
+                                params={"effective_status": _ALL_EFFECTIVE_STATUSES})
         return [dict(c) for c in campaigns]
 
     # ------------------------------------------------------------------
@@ -102,6 +105,11 @@ class MetaClient:
         _with_retry(adset.api_update, params=params)
         logger.info("updated adset", extra={"fb_id": adset_id})
 
+    def delete_adset(self, adset_id: str) -> None:
+        adset = AdSet(adset_id)
+        _with_retry(adset.api_delete)
+        logger.info("deleted adset", extra={"fb_id": adset_id})
+
     def get_adset(self, adset_id: str) -> dict:
         adset = AdSet(adset_id)
         _with_retry(adset.api_get, fields=ADSET_FIELDS)
@@ -109,7 +117,8 @@ class MetaClient:
 
     def list_adsets(self, campaign_id: str) -> list[dict]:
         campaign = Campaign(campaign_id)
-        adsets = _with_retry(campaign.get_ad_sets, fields=ADSET_FIELDS)
+        adsets = _with_retry(campaign.get_ad_sets, fields=ADSET_FIELDS,
+                             params={"effective_status": _ALL_EFFECTIVE_STATUSES})
         return [dict(a) for a in adsets]
 
     # ------------------------------------------------------------------
@@ -128,6 +137,11 @@ class MetaClient:
         _with_retry(ad.api_update, params=params)
         logger.info("updated ad", extra={"fb_id": ad_id})
 
+    def delete_ad(self, ad_id: str) -> None:
+        ad = Ad(ad_id)
+        _with_retry(ad.api_delete)
+        logger.info("deleted ad", extra={"fb_id": ad_id})
+
     def get_ad(self, ad_id: str) -> dict:
         ad = Ad(ad_id)
         _with_retry(ad.api_get, fields=AD_FIELDS)
@@ -135,7 +149,8 @@ class MetaClient:
 
     def list_ads(self, adset_id: str) -> list[dict]:
         adset = AdSet(adset_id)
-        ads = _with_retry(adset.get_ads, fields=AD_FIELDS)
+        ads = _with_retry(adset.get_ads, fields=AD_FIELDS,
+                          params={"effective_status": _ALL_EFFECTIVE_STATUSES})
         return [dict(a) for a in ads]
 
     # ------------------------------------------------------------------

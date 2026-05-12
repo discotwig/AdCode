@@ -1,12 +1,80 @@
 {
   "account_id": "act_366643171197739",
-  "last_pushed_at": "2026-05-11T21:25:21.080590+00:00",
+  "last_pushed_at": "2026-05-11T22:40:15.957241+00:00",
   "campaigns": {
     "AdCode Demo \u00e2\u20ac\u201d Brand Awareness": {
-      "fb_id": "120244516270680719",
+      "fb_id": "120244515578050719",
       "params": {
         "name": "AdCode Demo \u00e2\u20ac\u201d Brand Awareness",
         "objective": "OUTCOME_TRAFFIC",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {
+        "US 25-44 \u00e2\u20ac\u201d Broad": {
+          "fb_id": "120244517614370719",
+          "params": {
+            "name": "US 25-44 \u00e2\u20ac\u201d Broad",
+            "status": "PAUSED",
+            "daily_budget": 1000,
+            "billing_event": "LINK_CLICKS",
+            "optimization_goal": "LINK_CLICKS",
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "targeting": {
+              "age_min": 25,
+              "age_max": 44,
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ]
+              },
+              "publisher_platforms": [
+                "facebook",
+                "instagram"
+              ],
+              "targeting_automation": {
+                "advantage_audience": 0
+              }
+            }
+          },
+          "ads": {
+            "Demo Ad \u00e2\u20ac\u201d Headline v1": {
+              "fb_id": "120244517774310719",
+              "creative_id": "1684264789277391",
+              "params": {
+                "name": "Demo Ad \u00e2\u20ac\u201d Headline v1",
+                "status": "PAUSED"
+              }
+            }
+          }
+        }
+      }
+    },
+    "My campaign 1017": {
+      "fb_id": "23848811639550718",
+      "params": {
+        "name": "My campaign 1017",
+        "objective": "LINK_CLICKS",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {}
+    },
+    "Test API Campaign 1": {
+      "fb_id": "23845817703660718",
+      "params": {
+        "name": "Test API Campaign 1",
+        "objective": "PAGE_LIKES",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {}
+    },
+    "Atlanta Debut": {
+      "fb_id": "23845815648120718",
+      "params": {
+        "name": "Atlanta Debut",
+        "objective": "REACH",
         "status": "PAUSED",
         "special_ad_categories": []
       },

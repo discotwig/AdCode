@@ -13,6 +13,7 @@
           "daily_budget": 1000,
           "billing_event": "LINK_CLICKS",
           "optimization_goal": "LINK_CLICKS",
+          "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
           "targeting": {
             "age_min": 25,
             "age_max": 44,
@@ -50,6 +51,28 @@
           ]
         }
       ]
+    }
+    ,
+    {
+      "name": "My campaign 1017",
+      "objective": "LINK_CLICKS",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "ad_sets": []
+    },
+    {
+      "name": "Test API Campaign 1",
+      "objective": "PAGE_LIKES",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "ad_sets": []
+    },
+    {
+      "name": "Atlanta Debut",
+      "objective": "REACH",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "ad_sets": []
     }
   ]
 }
