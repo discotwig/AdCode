@@ -9,7 +9,7 @@ Git history is the audit trail. Pull requests are the review mechanism. No one n
 AdCode follows the same model as AWS CloudFormation or Terraform:
 
 | Concept | AdCode equivalent |
-|---|---|
+| --- | --- |
 | Template | Campaign JSON file (`campaigns/<slug>/<account>/file.json`) |
 | Stack state | `state/<account>.json` — maps every managed object to its Facebook ID |
 | Changeset | `plan_campaigns` output — validates + shows creates, updates, and deletes |
