@@ -176,7 +176,7 @@ def _parse_raw_email(raw: str) -> dict:
 
 def _to_html(text: str) -> str:
     """Convert markdown or plain text to HTML for email sending."""
-    return markdown_lib.markdown(text, extensions=["nl2br"])
+    return markdown_lib.markdown(text, extensions=["nl2br", "tables"])
 
 
 # ------------------------------------------------------------------
