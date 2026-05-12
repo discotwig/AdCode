@@ -10,6 +10,7 @@ import email as email_lib
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -203,6 +204,35 @@ def _format_plan_text(p) -> str:
     return "\n".join(lines)
 
 
+_APPLY_CLARIFICATIONS = """\
+You are an ad trafficking assistant. A campaign brief was partially extracted and sent to the
+client for clarification. Apply their answers to the draft campaigns.
+
+Draft campaigns (JSON):
+{campaigns_json}
+
+Questions that were asked:
+{questions}
+
+Client's reply thread (find their answers here):
+{reply_body}
+
+Instructions:
+1. Parse the client's answers — they may say "A-a, B-b", "a, a, a, a", or write them out in prose.
+2. Apply each answer to the correct field in the draft campaigns.
+3. Return updated campaigns with the answers applied.
+4. Only flag remaining ambiguities for fields still genuinely unclear after reading everything.
+5. Do NOT flag account_id — it is supplied externally.
+6. Do NOT re-flag anything already answered in this thread.
+
+Respond with a JSON object:
+- "campaigns": updated array of campaign objects
+- "ambiguities": only genuinely unresolved gaps (same structure as before)
+- "confidence": float 0.0–1.0
+
+Return only the JSON object, no other text."""
+
+
 # ------------------------------------------------------------------
 # Inbound handler — new brief from client
 # ------------------------------------------------------------------
@@ -267,7 +297,30 @@ async def _handle_inbound(parsed: dict, customer: dict):
             max_tokens=1024,
             messages=[{"role": "user", "content": consultant_prompt}],
         )
-        _reply_client(amb_response.content[0].text.strip())
+        questions_text = amb_response.content[0].text.strip()
+
+        # Save clarification state so the reply handler can apply answers
+        clarify_id = uuid.uuid4().hex[:8]
+        state_dir.mkdir(parents=True, exist_ok=True)
+        clarify_path = state_dir / f".clarifying_{clarify_id}.json"
+        clarify_path.write_text(json.dumps({
+            "clarify_id": clarify_id,
+            "client_from": from_addr,
+            "client_subject": subject,
+            "campaigns": ingest_result.campaigns,
+            "questions": questions_text,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2), encoding="utf-8")
+
+        send_email(EmailMessage(
+            from_=bot_email,
+            to=_bare_email(from_addr),
+            subject=f"Re: [Clarify-{clarify_id}] {subject}",
+            html=_to_html(questions_text),
+            reply_to=bot_email,
+            in_reply_to=parsed["message_id"] or None,
+        ), resend_key)
+        logger.info("Sent clarification request clarify_id=%s", clarify_id)
         return
 
     campaign_json = {"account_id": account_id, "campaigns": ingest_result.campaigns}
@@ -319,6 +372,170 @@ async def _handle_inbound(parsed: dict, customer: dict):
         html=_to_html(op_body),
     ), resend_key)
     logger.info("Sent plan to operator for pending_id=%s", pending_id)
+
+
+# ------------------------------------------------------------------
+# Clarification reply handler
+# ------------------------------------------------------------------
+
+async def _handle_clarification(parsed: dict, customer: dict, clarify_id: str):
+    from_addr = parsed["from"]
+    subject = parsed["subject"]
+    config_dir: Path = customer["_config_dir"]
+    env: dict = customer["_env"]
+    account_id: str = customer["account_id"]
+    state_dir = config_dir / customer.get("state_dir", "state")
+    bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
+    operator_email = customer.get("operator_email", "")
+    resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
+
+    ai_client = anthropic.Anthropic(
+        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
+        max_retries=6,
+    )
+
+    def _reply_client(body_text: str):
+        send_email(EmailMessage(
+            from_=bot_email,
+            to=_bare_email(from_addr),
+            subject=f"Re: {subject}",
+            html=_to_html(body_text),
+            reply_to=bot_email,
+            in_reply_to=parsed["message_id"] or None,
+        ), resend_key)
+
+    clarify_path = state_dir / f".clarifying_{clarify_id}.json"
+    if not clarify_path.exists():
+        logger.warning("No clarifying file for id=%s — treating as new brief", clarify_id)
+        await _handle_inbound(parsed, customer)
+        return
+
+    saved = json.loads(clarify_path.read_text(encoding="utf-8"))
+
+    # Apply answers to the saved draft
+    apply_prompt = _APPLY_CLARIFICATIONS.format(
+        campaigns_json=json.dumps(saved["campaigns"], indent=2),
+        questions=saved["questions"],
+        reply_body=parsed["body"],
+    )
+    response = ai_client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": apply_prompt}],
+    )
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rstrip("`").strip()
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("APPLY_CLARIFICATIONS returned non-JSON")
+        _reply_client("Sorry, we hit an issue processing your reply. Could you resend your answers?")
+        return
+
+    campaigns = result.get("campaigns", [])
+    ambiguities = result.get("ambiguities", [])
+
+    if ambiguities:
+        # Still gaps — ask again with a new clarify_id
+        from src.services.ingest import Ambiguity, IngestionResult
+        amb_objects = [
+            Ambiguity(
+                field=a.get("field", ""),
+                sheet=a.get("sheet", ""),
+                cell_ref=a.get("cell_ref", ""),
+                raw_value=str(a.get("raw_value", "")),
+                question=a.get("question", ""),
+            )
+            for a in ambiguities
+        ]
+        ambiguity_list = "\n".join(f"- {a.question}" for a in amb_objects)
+        consultant_prompt = AMBIGUITY_EMAIL.format(
+            subject=saved["client_subject"],
+            campaigns_json=json.dumps(campaigns, indent=2),
+            ambiguity_list=ambiguity_list,
+        )
+        amb_response = ai_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": consultant_prompt}],
+        )
+        questions_text = amb_response.content[0].text.strip()
+
+        new_clarify_id = uuid.uuid4().hex[:8]
+        new_clarify_path = state_dir / f".clarifying_{new_clarify_id}.json"
+        new_clarify_path.write_text(json.dumps({
+            "clarify_id": new_clarify_id,
+            "client_from": from_addr,
+            "client_subject": saved["client_subject"],
+            "campaigns": campaigns,
+            "questions": questions_text,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2), encoding="utf-8")
+
+        send_email(EmailMessage(
+            from_=bot_email,
+            to=_bare_email(from_addr),
+            subject=f"Re: [Clarify-{new_clarify_id}] {saved['client_subject']}",
+            html=_to_html(questions_text),
+            reply_to=bot_email,
+            in_reply_to=parsed["message_id"] or None,
+        ), resend_key)
+        clarify_path.unlink()
+        logger.info("Follow-up clarification new_clarify_id=%s", new_clarify_id)
+        return
+
+    # All clear — proceed to validate → plan → operator
+    clarify_path.unlink()
+    campaign_json = {"account_id": account_id, "campaigns": campaigns}
+
+    meta = MetaClient(
+        app_id=env.get("FB_APP_ID") or os.environ["FB_APP_ID"],
+        app_secret=env.get("FB_APP_SECRET") or os.environ["FB_APP_SECRET"],
+        access_token=env.get("FB_ACCESS_TOKEN") or os.environ["FB_ACCESS_TOKEN"],
+        account_id=account_id,
+    )
+    from src.services.validate import validate_all
+    validation = validate_all(campaign_json, ai_client)
+    if not validation.is_pushable:
+        _reply_client(
+            "Your brief could not be processed due to policy or schema issues:\n\n"
+            + validation.summary()
+        )
+        return
+
+    state = StateFile.load(account_id, state_dir=state_dir)
+    p = plan(campaign_json, state, meta)
+
+    pending_id = uuid.uuid4().hex[:8]
+    pending_path = state_dir / f".pending_{pending_id}.json"
+    pending_path.write_text(json.dumps({
+        "pending_id": pending_id,
+        "message_id": parsed["message_id"],
+        "client_from": from_addr,
+        "client_subject": saved["client_subject"],
+        "campaign_json": campaign_json,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }, indent=2), encoding="utf-8")
+
+    plan_text = _format_plan_text(p)
+    op_subject = f"[AdCode Review] {pending_id} | {saved['client_subject']}"
+    op_body = (
+        f"New campaign brief from: {from_addr}\n\n"
+        f"--- Plan ---\n{plan_text}\n\n"
+        f"Reply GO to apply or HOLD to discard."
+    )
+    send_email(EmailMessage(
+        from_=bot_email,
+        to=operator_email,
+        subject=op_subject,
+        html=_to_html(op_body),
+    ), resend_key)
+    logger.info("Clarification resolved — sent plan to operator pending_id=%s", pending_id)
 
 
 # ------------------------------------------------------------------
@@ -429,9 +646,14 @@ async def inbound_webhook(request: Request):
     if not parsed["from"]:
         parsed["from"] = from_addr
 
+    subj = parsed["subject"]
+    clarify_match = re.search(r"\[Clarify-([a-f0-9]{8})\]", subj)
+
     try:
-        if bare_from == operator_email and "[AdCode Review]" in parsed["subject"]:
+        if bare_from == operator_email and "[AdCode Review]" in subj:
             await _handle_operator_reply(parsed, customer)
+        elif clarify_match:
+            await _handle_clarification(parsed, customer, clarify_match.group(1))
         else:
             await _handle_inbound(parsed, customer)
     except APIStatusError as exc:

@@ -158,6 +158,9 @@ def test_inbound_with_ambiguities_replies_to_client(
         ambiguities=[Ambiguity("field", "", "", "val", "What budget?")],
         confidence=0.5,
     )
+    mock_anth.return_value.messages.create.return_value.content = [
+        MagicMock(text="A. Budget\na) $10/day (suggested)\nb) $20/day")
+    ]
     DEMO_CONFIG["_config_dir"] = tmp_path
     (tmp_path / "state").mkdir(exist_ok=True)
 
@@ -167,7 +170,8 @@ def test_inbound_with_ambiguities_replies_to_client(
     # No plan email; client gets ambiguity reply
     calls = mock_send.call_args_list
     assert len(calls) == 1
-    assert "Re: Q3 campaign" in calls[0].args[0].subject
+    assert "Q3 campaign" in calls[0].args[0].subject
+    assert "[Clarify-" in calls[0].args[0].subject
     mock_plan.assert_not_called()
 
 
