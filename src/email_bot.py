@@ -21,6 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import anthropic
+from anthropic import APIStatusError
 from dotenv import dotenv_values, load_dotenv
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
@@ -421,10 +422,28 @@ async def inbound_webhook(request: Request):
     if not parsed["from"]:
         parsed["from"] = from_addr
 
-    if bare_from == operator_email and "[AdCode Review]" in parsed["subject"]:
-        await _handle_operator_reply(parsed, customer)
-    else:
-        await _handle_inbound(parsed, customer)
+    try:
+        if bare_from == operator_email and "[AdCode Review]" in parsed["subject"]:
+            await _handle_operator_reply(parsed, customer)
+        else:
+            await _handle_inbound(parsed, customer)
+    except APIStatusError as exc:
+        if exc.status_code == 529:
+            logger.warning("Anthropic overloaded — returning 200 to avoid Worker rejection")
+            bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
+            resend_key = customer["_env"].get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
+            if resend_key and parsed.get("from"):
+                try:
+                    send_email(EmailMessage(
+                        from_=bot_email,
+                        to=_bare_email(parsed["from"]),
+                        subject=f"Re: {parsed.get('subject', '')}",
+                        html="We received your email but hit a temporary capacity issue on our end. Please resend in a few minutes and we'll pick it up right away. Sorry for the inconvenience.",
+                    ), resend_key)
+                except Exception:
+                    logger.exception("Failed to send overload notice")
+        else:
+            raise
 
     return {"status": "ok"}
 
