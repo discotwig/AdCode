@@ -198,7 +198,24 @@ Work is ordered chronologically. Each phase depends on the one before it. Check 
 
 ---
 
-## Phase 11 — SaaS Multi-Tenancy
+## Phase 11 — Unified Changeset (ADR-004)
+
+See `docs/decisions/004-unified-changeset.md` for full design.
+
+- [x] **Add delete operation types to `src/traffic.py`** — add `DeleteCampaign`, `DeleteAdSet`, `DeleteAd` dataclasses alongside the existing create/update types
+- [x] **Extend `plan()` in `src/traffic.py`** — after computing creates/updates, iterate over state file entries not present in the JSON and emit delete ops (using fb_ids from state, not name-matching Facebook)
+- [x] **Extend `apply()` in `src/traffic.py`** — execute delete ops leaf-first (ads → ad sets → campaigns) using `MetaClient.delete_*`; remove deleted entries from the state file and save
+- [x] **Update `preview_diff` MCP tool** — surface delete ops in the plan output alongside creates and updates; format clearly (e.g. `DELETE campaign "X" (fb_id: 123)`)
+- [x] **Update `push_campaigns` MCP tool** — if the plan contains deletes, return the plan and require `confirm_deletes=true` before applying; if no deletes, apply immediately as today
+- [x] **Remove `preview_teardown` and `teardown_campaigns` MCP tools** from `mcp_server.py`
+- [x] **Delete `src/services/teardown.py`** — logic is now absorbed into `traffic.py`
+- [x] **Update `tests/test_traffic.py`** — add tests for delete ops in `plan()` (state entries absent from JSON produce deletes) and `apply()` (deletes execute leaf-first, state file entries are removed)
+- [x] **Update `tests/test_mcp_server.py`** — update `push_campaigns` tests for the confirm_deletes guard; remove tests for the retired teardown tools
+- [ ] **Implement SWE-5: `find_duplicates` MCP tool** — fetch all campaigns for an account keyed by fb_id (not name), group by name, return each duplicate with fb_id and created date
+
+---
+
+## Phase 12 — SaaS Multi-Tenancy
 
 See `docs/saas-architecture.md` for full design.
 

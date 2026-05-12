@@ -8,7 +8,7 @@ Git history is the audit trail. Pull requests are the review mechanism. No one n
 
 1. Define campaigns in `campaigns/<account>.json` using the schema in `schemas/campaign.schema.json`
 2. Run `preview_diff` to see what will change before any API call is made
-3. Run `push_campaigns` to apply — the engine creates or updates campaigns and writes `state/<account>.json`
+3. Run `push_campaigns` to apply — the engine creates, updates, **or deletes** objects so Facebook matches the file exactly, then writes `state/<account>.json`
 4. Run `get_drift_report` to verify actuals match state after any manual changes
 
 The core scripts are exposed as MCP tools. Connect your model (Gemini, Claude, etc.) to the MCP server and interact via natural language.
@@ -44,13 +44,14 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 
 | Tool | Description |
 | --- | --- |
-| `push_campaigns(json_path)` | Validate, diff, and apply a campaign JSON file to Facebook |
+| `push_campaigns(json_path, confirm_deletes?)` | Validate and apply a campaign JSON file to Facebook — creates, updates, and deletes. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
 | `pause_campaigns(filter)` | Pause campaigns matching a name or account filter |
 | `get_campaign_json(filter?)` | Return raw state file JSON for inspection — read-only, no API calls |
 | `get_campaign_status(campaign_id)` | Fetch live status from Facebook for a single campaign |
 | `get_drift_report(account_id)` | Diff state file against Facebook actuals; report any divergence |
 | `validate_campaigns(json_path)` | Run schema + AI policy validation without pushing |
-| `preview_diff(json_path)` | Show what `push_campaigns` would do without making any changes |
+| `preview_diff(json_path)` | Show the full changeset (creates, updates, and deletes) without making any changes |
+| `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI |
 
 ## Repository layout
 
