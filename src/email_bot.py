@@ -211,7 +211,8 @@ async def _handle_inbound(parsed: dict, customer: dict):
     resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
 
     ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"]
+        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
+        max_retries=4,
     )
 
     def _reply_client(body_text: str):
@@ -376,7 +377,8 @@ async def _handle_operator_reply(parsed: dict, customer: dict):
         account_id=account_id,
     )
     ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"]
+        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
+        max_retries=4,
     )
 
     state = StateFile.load(account_id, state_dir=state_dir)
