@@ -218,6 +218,24 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="find_duplicates",
+            description=(
+                "Find campaigns with duplicate names in the Facebook Ad Account. "
+                "Fetches all campaigns live from Facebook, groups by name, and returns any name "
+                "that maps to more than one fb_id — along with created_time and status for each. "
+                "Use this to detect accidental duplicates before applying a campaign JSON."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "string",
+                        "description": "Ad account ID (e.g. act_366643171197739). Defaults to FB_ACCOUNT_ID env var.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -246,6 +264,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _ingest_excel(arguments)
         elif name == "import_adsets":
             return await _import_adsets(arguments)
+        elif name == "find_duplicates":
+            return await _find_duplicates(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as e:
@@ -313,7 +333,13 @@ async def _apply_campaigns(args: dict) -> list[TextContent]:
         )
         return [TextContent(type="text", text=msg)]
 
-    result = apply_plan(p, meta, state)
+    result = apply_plan(
+        p,
+        meta,
+        state,
+        campaign_json=campaign_json,
+        campaign_json_path=args.get("json_path"),
+    )
     lines = [validation.summary(), "", f"Applied: {result.summary()}"]
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -484,6 +510,28 @@ async def _import_adsets(args: dict) -> list[TextContent]:
             lines.append(f"  - {s}")
     lines.extend(["", "Run plan_campaigns to verify no spurious changes before committing."])
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _find_duplicates(args: dict) -> list[TextContent]:
+    account_id = args.get("account_id") or os.environ["FB_ACCOUNT_ID"]
+    meta = _get_meta_client()
+    campaigns = meta.list_campaigns(account_id)
+
+    by_name: dict[str, list[dict]] = {}
+    for c in campaigns:
+        by_name.setdefault(c["name"], []).append({
+            "fb_id": c["id"],
+            "created_time": c.get("created_time", ""),
+            "status": c.get("status", ""),
+        })
+
+    duplicates = {name: entries for name, entries in by_name.items() if len(entries) > 1}
+    result = {
+        "account_id": account_id,
+        "duplicate_count": len(duplicates),
+        "duplicates": duplicates,
+    }
+    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
 # ------------------------------------------------------------------

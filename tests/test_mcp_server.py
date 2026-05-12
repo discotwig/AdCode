@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from src.mcp_server import (
     _apply_campaigns, _plan_campaigns, _pause_campaigns,
     _get_local_state, _get_campaign_status, _get_drift_report,
-    _list_campaigns, _ingest_excel, _import_adsets, list_tools,
+    _list_campaigns, _ingest_excel, _import_adsets, _find_duplicates, list_tools,
 )
 from src.services.state import StateFile
 
@@ -488,3 +488,42 @@ async def test_list_tools_includes_import_adsets():
     tools = await list_tools()
     names = {t.name for t in tools}
     assert "import_adsets" in names
+
+
+# ------------------------------------------------------------------
+# find_duplicates
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_find_duplicates_returns_duplicates():
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = [
+        {"id": "camp_001", "name": "Summer Sale", "status": "ACTIVE", "created_time": "2026-01-01"},
+        {"id": "camp_002", "name": "Summer Sale", "status": "PAUSED", "created_time": "2026-01-02"},
+        {"id": "camp_003", "name": "Winter Promo", "status": "ACTIVE", "created_time": "2026-02-01"},
+    ]
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = await _find_duplicates({})
+    data = json.loads(result[0].text)
+    assert data["duplicate_count"] == 1
+    assert "Summer Sale" in data["duplicates"]
+    fb_ids = [e["fb_id"] for e in data["duplicates"]["Summer Sale"]]
+    assert "camp_001" in fb_ids
+    assert "camp_002" in fb_ids
+    assert "Winter Promo" not in data["duplicates"]
+
+
+@pytest.mark.asyncio
+async def test_find_duplicates_no_duplicates():
+    meta = _make_meta_client()
+    meta.list_campaigns.return_value = [
+        {"id": "camp_001", "name": "Summer Sale", "status": "ACTIVE", "created_time": "2026-01-01"},
+        {"id": "camp_002", "name": "Winter Promo", "status": "PAUSED", "created_time": "2026-02-01"},
+    ]
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = await _find_duplicates({})
+    data = json.loads(result[0].text)
+    assert data["duplicate_count"] == 0
+    assert data["duplicates"] == {}

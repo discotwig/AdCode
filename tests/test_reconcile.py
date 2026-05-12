@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from src.reconcile import (
     fetch_actuals, diff_state, format_report,
     DriftReport, DriftItem, DriftType,
+    _fix_mojibake, _values_equal,
 )
 from src.services.state import StateFile
 
@@ -193,3 +194,69 @@ class TestFormatReport:
         report = diff_state(synced_state, actuals)
         text = format_report(report)
         assert "status" in text
+
+
+# ------------------------------------------------------------------
+# Bug fixes
+# ------------------------------------------------------------------
+
+class TestFixMojibake:
+    def test_em_dash_mojibake_is_repaired(self):
+        garbled = "AdCode Demo \xe2\x80\x94 Brand Awareness"
+        assert _fix_mojibake(garbled) == "AdCode Demo — Brand Awareness"
+
+    def test_clean_ascii_is_unchanged(self):
+        assert _fix_mojibake("Summer Sale") == "Summer Sale"
+
+    def test_already_valid_unicode_is_unchanged(self):
+        assert _fix_mojibake("Café") == "Café"
+
+    def test_fetch_actuals_repairs_mojibake_in_campaign_name(self):
+        client = MagicMock()
+        client.list_campaigns.return_value = [
+            {"id": "c1", "name": "AdCode Demo \xe2\x80\x94 Brand Awareness", "status": "PAUSED", "objective": "OUTCOME_TRAFFIC"}
+        ]
+        client.list_adsets.return_value = []
+        actuals = fetch_actuals("act_123", client)
+        assert "AdCode Demo — Brand Awareness" in actuals
+
+
+class TestValuesEqual:
+    def test_int_equals_string_of_same_number(self):
+        assert _values_equal(1000, "1000")
+
+    def test_string_equals_int_of_same_number(self):
+        assert _values_equal("1000", 1000)
+
+    def test_different_numbers_are_not_equal(self):
+        assert not _values_equal(1000, 9999)
+
+    def test_non_numeric_strings_use_exact_match(self):
+        assert _values_equal("PAUSED", "PAUSED")
+        assert not _values_equal("PAUSED", "ACTIVE")
+
+    def test_budget_string_from_facebook_does_not_trigger_mismatch(self, synced_state=None):
+        # Simulates Facebook returning daily_budget as a string
+        state = StateFile("act_123")
+        state.upsert_campaign("Summer Sale", "camp_001", {"name": "Summer Sale", "status": "PAUSED", "objective": "OUTCOME_TRAFFIC"})
+        state.upsert_adset("Summer Sale", "US 25-54", "adset_001", {
+            "name": "US 25-54", "status": "PAUSED",
+            "billing_event": "IMPRESSIONS", "optimization_goal": "LINK_CLICKS", "daily_budget": 5000
+        })
+        state.upsert_ad("Summer Sale", "US 25-54", "Creative v1", "ad_001", "creative_001", {"name": "Creative v1", "status": "PAUSED"})
+
+        actuals = {
+            "Summer Sale": {
+                "fb_id": "camp_001", "name": "Summer Sale", "status": "PAUSED", "objective": "OUTCOME_TRAFFIC",
+                "ad_sets": {
+                    "US 25-54": {
+                        "fb_id": "adset_001", "name": "US 25-54", "status": "PAUSED",
+                        "billing_event": "IMPRESSIONS", "optimization_goal": "LINK_CLICKS",
+                        "daily_budget": "5000",  # Facebook returns as string
+                        "ads": {"Creative v1": {"fb_id": "ad_001", "name": "Creative v1", "status": "PAUSED"}}
+                    }
+                }
+            }
+        }
+        report = diff_state(state, actuals)
+        assert not report.has_drift()

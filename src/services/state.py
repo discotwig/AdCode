@@ -36,14 +36,35 @@ class StateFile:
     def get_campaign_id(self, campaign_name: str) -> str | None:
         return self._data["campaigns"].get(campaign_name, {}).get("fb_id")
 
+    def get_campaign_by_fb_id(self, fb_id: str) -> tuple[str, dict] | None:
+        for campaign_name, campaign in self._data["campaigns"].items():
+            if campaign.get("fb_id") == fb_id:
+                return campaign_name, campaign
+        return None
+
     def get_adset_id(self, campaign_name: str, adset_name: str) -> str | None:
         campaign = self._data["campaigns"].get(campaign_name, {})
         return campaign.get("ad_sets", {}).get(adset_name, {}).get("fb_id")
+
+    def get_adset_by_fb_id(self, fb_id: str) -> tuple[str, str, dict] | None:
+        for campaign_name, campaign in self._data["campaigns"].items():
+            for adset_name, adset in campaign.get("ad_sets", {}).items():
+                if adset.get("fb_id") == fb_id:
+                    return campaign_name, adset_name, adset
+        return None
 
     def get_ad_id(self, campaign_name: str, adset_name: str, ad_name: str) -> str | None:
         campaign = self._data["campaigns"].get(campaign_name, {})
         adset = campaign.get("ad_sets", {}).get(adset_name, {})
         return adset.get("ads", {}).get(ad_name, {}).get("fb_id")
+
+    def get_ad_by_fb_id(self, fb_id: str) -> tuple[str, str, str, dict] | None:
+        for campaign_name, campaign in self._data["campaigns"].items():
+            for adset_name, adset in campaign.get("ad_sets", {}).items():
+                for ad_name, ad in adset.get("ads", {}).items():
+                    if ad.get("fb_id") == fb_id:
+                        return campaign_name, adset_name, ad_name, ad
+        return None
 
     def get_campaign_params(self, campaign_name: str) -> dict | None:
         return self._data["campaigns"].get(campaign_name, {}).get("params")
@@ -61,31 +82,80 @@ class StateFile:
     # Write
     # ------------------------------------------------------------------
 
-    def upsert_campaign(self, campaign_name: str, fb_id: str, params: dict) -> None:
+    def upsert_campaign(self, campaign_name: str, fb_id: str, params: dict, old_name: str | None = None) -> None:
+        if old_name and old_name != campaign_name:
+            old_campaign = self._data["campaigns"].pop(old_name, {})
+        else:
+            old_campaign = {}
         existing = self._data["campaigns"].get(campaign_name, {})
         self._data["campaigns"][campaign_name] = {
             "fb_id": fb_id,
             "params": params,
-            "ad_sets": existing.get("ad_sets", {}),
+            "ad_sets": existing.get("ad_sets", old_campaign.get("ad_sets", {})),
         }
 
-    def upsert_adset(self, campaign_name: str, adset_name: str, fb_id: str, params: dict) -> None:
-        campaign = self._data["campaigns"].setdefault(campaign_name, {"fb_id": "", "params": {}, "ad_sets": {}})
+    def upsert_adset(
+        self,
+        campaign_name: str,
+        adset_name: str,
+        fb_id: str,
+        params: dict,
+        old_campaign_name: str | None = None,
+        old_adset_name: str | None = None,
+    ) -> None:
+        if campaign_name in self._data["campaigns"]:
+            campaign_lookup_name = campaign_name
+        elif old_campaign_name and old_campaign_name in self._data["campaigns"]:
+            campaign_lookup_name = old_campaign_name
+        else:
+            campaign_lookup_name = campaign_name
+        campaign = self._data["campaigns"].setdefault(campaign_lookup_name, {"fb_id": "", "params": {}, "ad_sets": {}})
+        if old_adset_name and old_adset_name != adset_name:
+            old_adset = campaign["ad_sets"].pop(old_adset_name, {})
+        else:
+            old_adset = {}
         existing = campaign["ad_sets"].get(adset_name, {})
         campaign["ad_sets"][adset_name] = {
             "fb_id": fb_id,
             "params": params,
-            "ads": existing.get("ads", {}),
+            "ads": existing.get("ads", old_adset.get("ads", {})),
         }
 
-    def upsert_ad(self, campaign_name: str, adset_name: str, ad_name: str,
-                  fb_id: str, creative_id: str, params: dict) -> None:
-        campaign = self._data["campaigns"].setdefault(campaign_name, {"fb_id": "", "params": {}, "ad_sets": {}})
-        adset = campaign["ad_sets"].setdefault(adset_name, {"fb_id": "", "params": {}, "ads": {}})
+    def upsert_ad(
+        self,
+        campaign_name: str,
+        adset_name: str,
+        ad_name: str,
+        fb_id: str,
+        creative_id: str,
+        params: dict,
+        old_campaign_name: str | None = None,
+        old_adset_name: str | None = None,
+        old_ad_name: str | None = None,
+    ) -> None:
+        if campaign_name in self._data["campaigns"]:
+            campaign_lookup_name = campaign_name
+        elif old_campaign_name and old_campaign_name in self._data["campaigns"]:
+            campaign_lookup_name = old_campaign_name
+        else:
+            campaign_lookup_name = campaign_name
+        campaign = self._data["campaigns"].setdefault(campaign_lookup_name, {"fb_id": "", "params": {}, "ad_sets": {}})
+        if adset_name in campaign["ad_sets"]:
+            adset_lookup_name = adset_name
+        elif old_adset_name and old_adset_name in campaign["ad_sets"]:
+            adset_lookup_name = old_adset_name
+        else:
+            adset_lookup_name = adset_name
+        adset = campaign["ad_sets"].setdefault(adset_lookup_name, {"fb_id": "", "params": {}, "ads": {}})
+        if old_ad_name and old_ad_name != ad_name:
+            old_ad = adset["ads"].pop(old_ad_name, {})
+        else:
+            old_ad = {}
+        existing = adset["ads"].get(ad_name, {})
         adset["ads"][ad_name] = {
             "fb_id": fb_id,
             "creative_id": creative_id,
-            "params": params,
+            "params": params or existing.get("params", old_ad.get("params", {})),
         }
 
     def delete_campaign(self, campaign_name: str) -> None:

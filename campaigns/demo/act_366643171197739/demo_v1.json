@@ -1,13 +1,15 @@
-{
+﻿{
   "account_id": "act_366643171197739",
   "campaigns": [
     {
-      "name": "AdCode Demo — Brand Awareness",
+      "fb_id": "120244515578050719",
+      "name": "AdCode Demo Traffic",
       "objective": "OUTCOME_TRAFFIC",
       "status": "PAUSED",
       "special_ad_categories": [],
       "ad_sets": [
         {
+          "fb_id": "120244517614370719",
           "name": "US 25-44 — Broad",
           "status": "PAUSED",
           "daily_budget": 1000,
@@ -27,6 +29,7 @@
           },
           "ads": [
             {
+              "fb_id": "120244517774310719",
               "name": "Demo Ad — Headline v1",
               "status": "PAUSED",
               "creative": {
@@ -53,12 +56,14 @@
       ]
     },
     {
+      "fb_id": "23848811639550718",
       "name": "My campaign 1017",
       "objective": "LINK_CLICKS",
       "status": "PAUSED",
       "special_ad_categories": [],
       "ad_sets": [
         {
+          "fb_id": "23848811670940718",
           "name": "My Ad Set",
           "status": "PAUSED",
           "ads": [],
@@ -80,12 +85,14 @@
       ]
     },
     {
+      "fb_id": "23845817703660718",
       "name": "Test API Campaign 1",
       "objective": "PAGE_LIKES",
       "status": "PAUSED",
       "special_ad_categories": [],
       "ad_sets": [
         {
+          "fb_id": "23845817916220718",
           "name": "Test API AdSet 1",
           "status": "PAUSED",
           "ads": [],
@@ -108,12 +115,14 @@
       ]
     },
     {
+      "fb_id": "23845815648120718",
       "name": "Atlanta Debut",
       "objective": "REACH",
       "status": "PAUSED",
       "special_ad_categories": [],
       "ad_sets": [
         {
+          "fb_id": "23845815648140718",
           "name": "Atlanta Debut",
           "status": "PAUSED",
           "ads": [],

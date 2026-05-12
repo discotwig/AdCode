@@ -48,21 +48,39 @@ def fetch_actuals(account_id: str, client: MetaClient) -> dict:
     result: dict[str, dict] = {}
     for campaign in campaigns:
         cid = campaign.get("id", "")
-        cname = campaign.get("name", cid)
+        cname = _fix_mojibake(campaign.get("name", cid))
         adsets_raw = client.list_adsets(cid)
         adsets: dict[str, dict] = {}
         for adset in adsets_raw:
             aid = adset.get("id", "")
-            aname = adset.get("name", aid)
+            aname = _fix_mojibake(adset.get("name", aid))
             ads_raw = client.list_ads(aid)
             ads: dict[str, dict] = {}
             for ad in ads_raw:
                 ad_id = ad.get("id", "")
-                ad_name = ad.get("name", ad_id)
+                ad_name = _fix_mojibake(ad.get("name", ad_id))
                 ads[ad_name] = {**ad, "fb_id": ad_id}
             adsets[aname] = {**adset, "fb_id": aid, "ads": ads}
         result[cname] = {**campaign, "fb_id": cid, "ad_sets": adsets}
     return result
+
+
+def _fix_mojibake(s: str) -> str:
+    """Facebook SDK sometimes returns UTF-8 bytes decoded as Latin-1 (e.g. em dash → â€"). Reverse it."""
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
+def _values_equal(a, b) -> bool:
+    if a == b:
+        return True
+    # Facebook returns numeric fields (budgets, bid amounts) as strings; coerce for comparison.
+    try:
+        return int(a) == int(b)
+    except (TypeError, ValueError):
+        return False
 
 
 def _compare_fields(tracked: set, expected: dict, actual: dict) -> dict:
@@ -70,7 +88,7 @@ def _compare_fields(tracked: set, expected: dict, actual: dict) -> dict:
     for field_name in tracked:
         exp_val = expected.get(field_name)
         act_val = actual.get(field_name)
-        if exp_val is not None and exp_val != act_val:
+        if exp_val is not None and not _values_equal(exp_val, act_val):
             mismatches[field_name] = {"expected": exp_val, "actual": act_val}
     return mismatches
 

@@ -34,7 +34,7 @@ def _with_retry(fn, *args, **kwargs):
             time.sleep(wait)
     raise last_exc
 
-CAMPAIGN_FIELDS = ["id", "name", "objective", "status", "effective_status", "special_ad_categories", "spend_cap", "daily_budget"]
+CAMPAIGN_FIELDS = ["id", "name", "objective", "status", "effective_status", "special_ad_categories", "spend_cap", "daily_budget", "created_time"]
 ADSET_FIELDS = ["id", "name", "campaign_id", "status", "effective_status", "targeting", "billing_event",
                 "optimization_goal", "bid_strategy", "bid_amount", "daily_budget", "lifetime_budget",
                 "start_time", "end_time"]

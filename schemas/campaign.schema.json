@@ -24,6 +24,10 @@
       "required": ["name", "objective", "status", "special_ad_categories", "ad_sets"],
       "additionalProperties": false,
       "properties": {
+        "fb_id": {
+          "type": "string",
+          "description": "Facebook campaign ID for stable correlation. Optional for new campaigns."
+        },
         "name": { "type": "string", "minLength": 1 },
         "objective": {
           "type": "string",
@@ -83,6 +87,10 @@
       "required": ["name", "status", "targeting", "billing_event", "optimization_goal", "ads"],
       "additionalProperties": false,
       "properties": {
+        "fb_id": {
+          "type": "string",
+          "description": "Facebook ad set ID for stable correlation. Optional for new ad sets."
+        },
         "name": { "type": "string", "minLength": 1 },
         "status": {
           "type": "string",
@@ -233,6 +241,10 @@
       "required": ["name", "status", "creative"],
       "additionalProperties": false,
       "properties": {
+        "fb_id": {
+          "type": "string",
+          "description": "Facebook ad ID for stable correlation. Optional for new ads."
+        },
         "name": { "type": "string", "minLength": 1 },
         "status": {
           "type": "string",
