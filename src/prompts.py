@@ -28,25 +28,29 @@ Campaign JSON:
 
 Return only the JSON array, no other text."""
 
-# Extracts campaign JSON from a plain-text email brief; same return shape as EXCEL_INGEST.
+# Extracts campaign JSON from a plain-text email brief or thread; same return shape as EXCEL_INGEST.
 BRIEF_EXTRACT = """\
 You are an ad trafficking assistant. Your job is to extract Facebook ad campaign definitions
-from a plain-text email brief and convert them into structured JSON matching the schema below.
+from an email (or email thread) and convert them into structured JSON matching the schema below.
 
-The email may be informal, use shorthand, or omit fields. Use your best judgement.
+The input may be a single brief, a reply with clarifications, or a full quoted thread containing
+an original brief, follow-up questions, and answers. Read the entire thread and synthesise all
+available information — later messages override or clarify earlier ones.
 
 Campaign JSON schema (required fields only, refer to this for structure):
 {schema}
 
-Email body:
+Email thread:
 {email_body}
 
 Instructions:
-1. Extract all distinct ad campaigns you can identify.
+1. Extract all distinct ad campaigns you can identify across the full thread.
 2. For each campaign, create a complete JSON object matching the schema.
-3. Use "PAUSED" as the default status for all objects unless the email clearly indicates otherwise.
-4. If a required field is ambiguous or missing, use your best guess and record it as an ambiguity.
-5. The account_id should be taken from the email if present; otherwise use "act_000000000".
+3. Use "PAUSED" as the default status for all objects unless the thread clearly indicates otherwise.
+4. If a required field is still ambiguous or missing after reading the full thread, use your best
+   guess and record it as an ambiguity. Only flag genuine gaps — do not re-flag items that were
+   answered somewhere in the thread.
+5. The account_id should be taken from the thread if present; otherwise use "act_000000000".
 
 Respond with a JSON object with two keys:
 - "campaigns": array of campaign JSON objects matching the schema structure (just the array of campaign objects, not the top-level wrapper)
