@@ -214,6 +214,8 @@ See `docs/decisions/004-unified-changeset.md` for full design.
 - [x] **Update `tests/test_traffic.py`** — add tests for delete ops in `plan()` (state entries absent from JSON produce deletes) and `apply()` (deletes execute leaf-first, state file entries are removed)
 - [x] **Update `tests/test_mcp_server.py`** — update `push_campaigns` tests for the confirm_deletes guard; remove tests for the retired teardown tools
 - [x] **Implement SWE-5: `find_duplicates` MCP tool** — fetch all campaigns for an account keyed by fb_id (not name), group by name, return each duplicate with fb_id and created date
+- [x] **`fb_id`-based correlation in plan engine** — `plan()` matches campaigns/adsets/ads by `fb_id` in the JSON before falling back to name-match; `UpdateCampaign/UpdateAdSet/UpdateAd` carry `old_*_name` so `apply()` migrates state entries on rename; `state.py` adds `get_*_by_fb_id()` lookups; `fb_id` fields added as optional to `schemas/campaign.schema.json`
+- [x] **`import_adsets` MCP tool** — adopt untracked ad sets from Facebook (MISSING_FROM_STATE) into the campaign JSON and state file in one command; equivalent of `terraform import` for ad sets; ADR-005 documents the design
 
 ---
 

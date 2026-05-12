@@ -60,7 +60,10 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 | `list_campaigns(account_id?)` | Fetch all campaigns directly from Facebook — always live, never from the local state file |
 | `pause_campaigns(filter)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly, works for campaigns not tracked in state |
 | `get_campaign_status(campaign_id)` | Fetch live fields for a single campaign from Facebook by ID |
+| `get_campaign_export(account_id)` | Fetch the full campaign hierarchy (campaigns + ad sets + ads) for an account in one call — always live |
 | `get_drift_report(account_id)` | Compare local state to live Facebook data; report objects missing, untracked, or field-mismatched |
+| `import_adsets(json_path, account_id, name_filter?)` | Adopt ad sets that exist on Facebook but are not tracked in state (MISSING_FROM_STATE items) — the equivalent of `terraform import` for ad sets |
+| `find_duplicates(account_id)` | Find campaigns with duplicate names in the account; returns each name with multiple fb_ids along with created_time and status |
 | `get_local_state(filter?)` | Read the local state file (cache) — shows what AdCode last recorded after a push, not live Facebook state |
 | `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI; flags ambiguities for human review |
 
@@ -88,6 +91,8 @@ docs/               Architecture decisions, API research, build checklist
 See `schemas/campaign.schema.json` for the full schema. A minimal example is in `campaigns/example.json`.
 
 The structure mirrors Facebook's object hierarchy: campaign → ad set → ad → creative.
+
+Each campaign, ad set, and ad supports an optional `fb_id` field. When present, `plan_campaigns` matches by `fb_id` instead of name, enabling stable tracking through renames. The `import_adsets` tool populates `fb_id` automatically for imported objects.
 
 ## Excel ingestion
 
