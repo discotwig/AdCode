@@ -11,7 +11,7 @@ from src.mcp_server import (
 )
 from src.services.state import StateFile
 
-CAMPAIGNS_DIR = Path(__file__).parent.parent / "campaigns"
+CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 
 
 # ------------------------------------------------------------------

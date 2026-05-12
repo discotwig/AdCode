@@ -8,7 +8,7 @@ from src.services.validate import (
     ValidationResult, ValidationError, PolicyWarning, Severity,
 )
 
-CAMPAIGNS_DIR = Path(__file__).parent.parent / "campaigns"
+CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture

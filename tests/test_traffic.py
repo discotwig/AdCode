@@ -13,7 +13,7 @@ from src.traffic import (
 )
 from src.services.state import StateFile
 
-CAMPAIGNS_DIR = Path(__file__).parent.parent / "campaigns"
+CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 
 
 # ------------------------------------------------------------------

@@ -5,7 +5,7 @@ from pathlib import Path
 import jsonschema
 
 SCHEMAS_DIR = Path(__file__).parent.parent / "schemas"
-CAMPAIGNS_DIR = Path(__file__).parent.parent / "campaigns"
+CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture

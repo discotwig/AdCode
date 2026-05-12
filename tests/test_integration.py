@@ -23,7 +23,7 @@ from src.services.state import StateFile
 from src.traffic import load_campaign_json, plan, apply as apply_plan
 from src.reconcile import fetch_actuals, diff_state, DriftType  # noqa: F401 (kept for future use)
 
-CAMPAIGNS_DIR = Path(__file__).parent.parent / "campaigns"
+CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 
 
 def _campaign_no_ads(account_id: str) -> dict:
