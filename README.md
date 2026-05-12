@@ -4,6 +4,14 @@ Infrastructure-as-code for ad campaign trafficking. The JSON file is the desired
 
 Git history is the audit trail. Pull requests are the review mechanism. No one needs to log into Facebook Ads Manager for routine trafficking or QA.
 
+## Service model
+
+AdCode is designed to be operated as a **contractor service**, not a SaaS product. The operator provides an email address; clients send media plans; campaigns get pushed; confirmations come back. The client never interacts with the MCP server or Facebook API directly.
+
+This maps onto how agencies already buy ad trafficking — as a contractor engagement, not a software subscription. No procurement friction, no seat licenses, no client onboarding beyond "send us your brief."
+
+The operator is the human in the loop. Every push goes through a plan-review step before `apply_campaigns` runs. The operator approves the plan; the software executes it. See ADR-008 for the full design rationale.
+
 ## How it works
 
 AdCode follows the same model as AWS CloudFormation or Terraform:
@@ -97,6 +105,29 @@ Each campaign, ad set, and ad supports an optional `fb_id` field. When present, 
 ## Excel ingestion
 
 If you have an Excel brief, use the `ingest_excel` tool with an Excel path and the AI will extract campaign definitions against the schema, flag ambiguities, and return JSON ready for review. Commit the JSON after reviewing ambiguities — do not re-ingest from Excel after the JSON is committed.
+
+## Multi-tenant deployment
+
+Each client gets their own server process, working directory, and credentials. MCP has no built-in auth — isolation is achieved through process boundaries, not middleware.
+
+```
+customers/
+  acme/
+    config.json        ← account_id, data paths (committed)
+    .env               ← FB + Anthropic credentials (gitignored)
+    campaigns/
+      act_123456/
+        q1_brand.json
+    state/
+      act_123456.json
+  globex/
+    config.json
+    .env
+    campaigns/
+    state/
+```
+
+A server instance started in `customers/acme/` can only reach Acme's account and data. It has no path or credentials for any other client. See ADR-008 for the full design.
 
 ## Connecting Gemini (or any MCP-compatible model)
 
