@@ -63,6 +63,24 @@ class UpdateAd:
     fb_id: str
     changed_fields: dict
 
+@dataclass
+class DeleteCampaign:
+    campaign_name: str
+    fb_id: str
+
+@dataclass
+class DeleteAdSet:
+    campaign_name: str
+    adset_name: str
+    fb_id: str
+
+@dataclass
+class DeleteAd:
+    campaign_name: str
+    adset_name: str
+    ad_name: str
+    fb_id: str
+
 
 @dataclass
 class Plan:
@@ -70,6 +88,10 @@ class Plan:
 
     def __len__(self):
         return len(self.operations)
+
+    @property
+    def has_deletes(self) -> bool:
+        return any(isinstance(op, (DeleteCampaign, DeleteAdSet, DeleteAd)) for op in self.operations)
 
     def summary(self) -> str:
         counts: dict[str, int] = {}
@@ -139,45 +161,95 @@ def load_campaign_json(path: str) -> dict:
 
 
 def plan(campaign_json: dict, state: StateFile, client: MetaClient) -> Plan:
-    ops: list = []
+    create_update_ops: list = []
+    delete_ad_ops: list = []
+    delete_adset_ops: list = []
+    delete_campaign_ops: list = []
+
+    desired_campaigns = {c["name"]: c for c in campaign_json["campaigns"]}
+
     for campaign in campaign_json["campaigns"]:
         cname = campaign["name"]
         existing_campaign_id = state.get_campaign_id(cname)
 
         if existing_campaign_id is None:
-            ops.append(CreateCampaign(campaign=campaign))
+            create_update_ops.append(CreateCampaign(campaign=campaign))
         else:
             stored_params = state.get_campaign_params(cname) or {}
             changed = _diff_fields(campaign, stored_params, _CAMPAIGN_DIFF_FIELDS)
             if changed:
-                ops.append(UpdateCampaign(campaign_name=cname, fb_id=existing_campaign_id, changed_fields=changed))
+                create_update_ops.append(UpdateCampaign(campaign_name=cname, fb_id=existing_campaign_id, changed_fields=changed))
+
+        desired_adsets = {a["name"]: a for a in campaign.get("ad_sets", [])}
 
         for adset in campaign.get("ad_sets", []):
             aname = adset["name"]
             existing_adset_id = state.get_adset_id(cname, aname)
 
             if existing_adset_id is None:
-                ops.append(CreateAdSet(campaign_name=cname, adset=adset))
+                create_update_ops.append(CreateAdSet(campaign_name=cname, adset=adset))
             else:
                 stored_adset_params = state.get_adset_params(cname, aname) or {}
                 changed = _diff_fields(adset, stored_adset_params, _ADSET_DIFF_FIELDS)
                 if changed:
-                    ops.append(UpdateAdSet(campaign_name=cname, adset_name=aname,
-                                           fb_id=existing_adset_id, changed_fields=changed))
+                    create_update_ops.append(UpdateAdSet(campaign_name=cname, adset_name=aname,
+                                                         fb_id=existing_adset_id, changed_fields=changed))
+
+            desired_ads = {a["name"]: a for a in adset.get("ads", [])}
 
             for ad in adset.get("ads", []):
                 adname = ad["name"]
                 existing_ad_id = state.get_ad_id(cname, aname, adname)
 
                 if existing_ad_id is None:
-                    ops.append(CreateAd(campaign_name=cname, adset_name=aname, ad=ad))
+                    create_update_ops.append(CreateAd(campaign_name=cname, adset_name=aname, ad=ad))
                 else:
                     stored_ad_params = state.get_ad_params(cname, aname, adname) or {}
                     changed = _diff_fields(ad, stored_ad_params, _AD_DIFF_FIELDS)
                     if changed:
-                        ops.append(UpdateAd(campaign_name=cname, adset_name=aname, ad_name=adname,
-                                            fb_id=existing_ad_id, changed_fields=changed))
-    return Plan(operations=ops)
+                        create_update_ops.append(UpdateAd(campaign_name=cname, adset_name=aname, ad_name=adname,
+                                                          fb_id=existing_ad_id, changed_fields=changed))
+
+            # Ads removed from this adset
+            state_ads = (state.campaigns().get(cname, {})
+                         .get("ad_sets", {}).get(aname, {}).get("ads", {}))
+            for ad_name, adstate in state_ads.items():
+                if ad_name not in desired_ads:
+                    delete_ad_ops.append(DeleteAd(
+                        campaign_name=cname, adset_name=aname, ad_name=ad_name,
+                        fb_id=adstate["fb_id"],
+                    ))
+
+        # Adsets removed from this campaign
+        state_adsets = state.campaigns().get(cname, {}).get("ad_sets", {})
+        for aname, astate in state_adsets.items():
+            if aname not in desired_adsets:
+                for ad_name, adstate in astate.get("ads", {}).items():
+                    delete_ad_ops.append(DeleteAd(
+                        campaign_name=cname, adset_name=aname, ad_name=ad_name,
+                        fb_id=adstate["fb_id"],
+                    ))
+                delete_adset_ops.append(DeleteAdSet(
+                    campaign_name=cname, adset_name=aname, fb_id=astate["fb_id"],
+                ))
+
+    # Campaigns removed from JSON entirely
+    for cname, cstate in state.campaigns().items():
+        if cname not in desired_campaigns:
+            for aname, astate in cstate.get("ad_sets", {}).items():
+                for ad_name, adstate in astate.get("ads", {}).items():
+                    delete_ad_ops.append(DeleteAd(
+                        campaign_name=cname, adset_name=aname, ad_name=ad_name,
+                        fb_id=adstate["fb_id"],
+                    ))
+                delete_adset_ops.append(DeleteAdSet(
+                    campaign_name=cname, adset_name=aname, fb_id=astate["fb_id"],
+                ))
+            delete_campaign_ops.append(DeleteCampaign(
+                campaign_name=cname, fb_id=cstate["fb_id"],
+            ))
+
+    return Plan(operations=create_update_ops + delete_ad_ops + delete_adset_ops + delete_campaign_ops)
 
 
 def apply(p: Plan, client: MetaClient, state: StateFile) -> ApplyResult:
@@ -241,6 +313,24 @@ def apply(p: Plan, client: MetaClient, state: StateFile) -> ApplyResult:
                 stored = state.get_ad_params(op.campaign_name, op.adset_name, op.ad_name) or {}
                 creative_id = state.to_dict()["campaigns"][op.campaign_name]["ad_sets"][op.adset_name]["ads"][op.ad_name]["creative_id"]
                 state.upsert_ad(op.campaign_name, op.adset_name, op.ad_name, op.fb_id, creative_id, {**stored, **op.changed_fields})
+                state.save()
+                result.succeeded.append(OperationResult(op, success=True))
+
+            elif isinstance(op, DeleteAd):
+                client.delete_ad(op.fb_id)
+                state.delete_ad(op.campaign_name, op.adset_name, op.ad_name)
+                state.save()
+                result.succeeded.append(OperationResult(op, success=True))
+
+            elif isinstance(op, DeleteAdSet):
+                client.delete_adset(op.fb_id)
+                state.delete_adset(op.campaign_name, op.adset_name)
+                state.save()
+                result.succeeded.append(OperationResult(op, success=True))
+
+            elif isinstance(op, DeleteCampaign):
+                client.delete_campaign(op.fb_id)
+                state.delete_campaign(op.campaign_name)
                 state.save()
                 result.succeeded.append(OperationResult(op, success=True))
 

@@ -19,7 +19,7 @@ from src.api.meta import MetaClient
 from src.services.state import StateFile
 from src.services.validate import validate_all
 from src.services.ingest import read_excel, extract_campaigns, format_ambiguity_report
-from src.traffic import load_campaign_json, plan, apply as apply_plan
+from src.traffic import load_campaign_json, plan, apply as apply_plan, DeleteCampaign, DeleteAdSet, DeleteAd
 from src.reconcile import fetch_actuals, diff_state, format_report
 
 load_dotenv()
@@ -65,7 +65,8 @@ async def list_tools() -> list[Tool]:
             name="push_campaigns",
             description=(
                 "Validate, diff, and apply a campaign JSON file to Facebook. "
-                "Runs schema validation, AI policy check, and a preview diff before pushing. "
+                "Creates, updates, AND deletes objects so Facebook matches the file exactly. "
+                "If the plan includes deletions, returns the plan and requires confirm_deletes=true to proceed. "
                 "Aborts if validation produces blocking errors."
             ),
             inputSchema={
@@ -73,6 +74,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "json_path": {"type": "string", "description": "Path to campaign JSON file in the repo."},
                     "json_str": {"type": "string", "description": "Inline campaign JSON string."},
+                    "confirm_deletes": {"type": "boolean", "description": "Set true to apply a plan that includes deletions."},
                 },
             },
         ),
@@ -134,7 +136,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="preview_diff",
-            description="Show what push_campaigns would do without making any API calls.",
+            description="Show the full changeset (creates, updates, and deletes) without making any changes.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -187,6 +189,27 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=f"Error: {e}")]
 
 
+def _format_plan(p) -> str:
+    lines = [f"Plan: {p.summary()}", ""]
+    for op in p.operations:
+        op_type = type(op).__name__
+        cname = (getattr(op, "campaign_name", None)
+                 or getattr(op, "campaign", {}).get("name", "") or "")
+        aname = getattr(op, "adset_name", "")
+        ad_name = getattr(op, "ad_name", "")
+        fb_id = getattr(op, "fb_id", "")
+
+        if op_type.startswith("Delete"):
+            label = f"  DELETE {op_type.replace('Delete', '').lower()}"
+            detail = " / ".join(filter(None, [cname, aname, ad_name]))
+            lines.append(f"{label}: \"{detail}\"  (fb_id: {fb_id})")
+        elif hasattr(op, "changed_fields"):
+            lines.append(f"  {op_type}: {cname} — fields: {list(op.changed_fields.keys())}")
+        else:
+            lines.append(f"  {op_type}: {cname}")
+    return "\n".join(lines)
+
+
 async def _push_campaigns(args: dict) -> list[TextContent]:
     campaign_json = _resolve_campaign_json(args.get("json_path"), args.get("json_str"))
     ai_client = _get_ai_client()
@@ -202,6 +225,14 @@ async def _push_campaigns(args: dict) -> list[TextContent]:
 
     if len(p) == 0:
         return [TextContent(type="text", text=f"No changes detected.\n\n{validation.summary()}")]
+
+    if p.has_deletes and not args.get("confirm_deletes"):
+        msg = (
+            f"{validation.summary()}\n\n"
+            "Plan includes deletions. Call again with confirm_deletes=true to proceed.\n\n"
+            + _format_plan(p)
+        )
+        return [TextContent(type="text", text=msg)]
 
     result = apply_plan(p, meta, state)
     lines = [validation.summary(), "", f"Push complete: {result.summary()}"]
@@ -282,18 +313,7 @@ async def _preview_diff(args: dict) -> list[TextContent]:
     if len(p) == 0:
         return [TextContent(type="text", text="No changes. State matches desired configuration.")]
 
-    lines = [f"Plan: {p.summary()}", ""]
-    for op in p.operations:
-        op_type = type(op).__name__
-        name = (getattr(op, "campaign_name", None)
-                or getattr(op, "campaign", {}).get("name", "")
-                or getattr(op, "adset_name", None)
-                or getattr(op, "ad_name", None) or "")
-        if hasattr(op, "changed_fields"):
-            lines.append(f"  {op_type}: {name} — fields: {list(op.changed_fields.keys())}")
-        else:
-            lines.append(f"  {op_type}: {name}")
-    return [TextContent(type="text", text="\n".join(lines))]
+    return [TextContent(type="text", text=_format_plan(p))]
 
 
 async def _ingest_excel(args: dict) -> list[TextContent]:

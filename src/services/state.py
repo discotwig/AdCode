@@ -88,6 +88,18 @@ class StateFile:
             "params": params,
         }
 
+    def delete_campaign(self, campaign_name: str) -> None:
+        self._data["campaigns"].pop(campaign_name, None)
+
+    def delete_adset(self, campaign_name: str, adset_name: str) -> None:
+        campaign = self._data["campaigns"].get(campaign_name, {})
+        campaign.get("ad_sets", {}).pop(adset_name, None)
+
+    def delete_ad(self, campaign_name: str, adset_name: str, ad_name: str) -> None:
+        campaign = self._data["campaigns"].get(campaign_name, {})
+        adset = campaign.get("ad_sets", {}).get(adset_name, {})
+        adset.get("ads", {}).pop(ad_name, None)
+
     # ------------------------------------------------------------------
     # Serialisation
     # ------------------------------------------------------------------

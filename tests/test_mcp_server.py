@@ -60,6 +60,8 @@ async def test_list_tools_returns_all_tools():
     assert "validate_campaigns" in names
     assert "preview_diff" in names
     assert "ingest_excel" in names
+    assert "preview_teardown" not in names
+    assert "teardown_campaigns" not in names
 
 
 # ------------------------------------------------------------------
@@ -261,3 +263,36 @@ async def test_preview_diff_no_changes_message(tmp_path):
           patch("src.services.state.STATE_DIR", tmp_path)):
         result = await _preview_diff({"json_path": EXAMPLE_PATH})
     assert "No changes" in result[0].text
+
+
+# ------------------------------------------------------------------
+# push_campaigns — confirm_deletes guard
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_push_campaigns_returns_plan_when_deletes_without_confirm(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _push_campaigns({"json_path": EXAMPLE_PATH})
+    text = result[0].text
+    assert "confirm_deletes" in text
+    assert "DELETE" in text.upper()
+
+
+@pytest.mark.asyncio
+async def test_push_campaigns_executes_deletes_with_confirm(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"])
+    state.upsert_campaign("Stale Campaign", "stale_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
+    meta = _make_meta_client()
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        result = await _push_campaigns({"json_path": EXAMPLE_PATH, "confirm_deletes": True})
+    text = result[0].text
+    assert "Push complete" in text
+    meta.delete_campaign.assert_called_with("stale_001")

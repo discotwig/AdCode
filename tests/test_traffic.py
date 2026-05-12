@@ -9,6 +9,7 @@ from src.traffic import (
     CreateCampaign, UpdateCampaign,
     CreateAdSet, UpdateAdSet,
     CreateAd, UpdateAd,
+    DeleteCampaign, DeleteAdSet, DeleteAd,
 )
 from src.services.state import StateFile
 
@@ -50,6 +51,13 @@ def populated_state(example_campaign):
     s.upsert_adset(campaign["name"], adset["name"], "adset_fb_001", {"name": adset["name"], "status": adset["status"], "billing_event": adset["billing_event"], "optimization_goal": adset["optimization_goal"], "daily_budget": adset["daily_budget"]})
     s.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad_fb_001", "creative_fb_001", {"name": ad["name"], "status": ad["status"]})
     return s
+
+
+@pytest.fixture
+def state_with_extra_campaign(populated_state, example_campaign):
+    populated_state.upsert_campaign("Stale Campaign", "stale_camp_001", {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []})
+    populated_state.upsert_adset("Stale Campaign", "Stale AdSet", "stale_adset_001", {"name": "Stale AdSet", "status": "PAUSED", "billing_event": "LINK_CLICKS", "optimization_goal": "LINK_CLICKS", "daily_budget": 500})
+    return populated_state
 
 
 # ------------------------------------------------------------------
@@ -193,3 +201,95 @@ class TestApply:
             p = plan(example_campaign, empty_state, mock_client)
             result = apply(p, mock_client, empty_state)
         assert "succeeded" in result.summary()
+
+
+# ------------------------------------------------------------------
+# plan() — delete detection
+# ------------------------------------------------------------------
+
+class TestPlanDeletes:
+    def test_delete_campaign_absent_from_json(self, example_campaign, mock_client, state_with_extra_campaign):
+        p = plan(example_campaign, state_with_extra_campaign, mock_client)
+        delete_ops = [op for op in p.operations if isinstance(op, DeleteCampaign)]
+        assert len(delete_ops) == 1
+        assert delete_ops[0].campaign_name == "Stale Campaign"
+        assert delete_ops[0].fb_id == "stale_camp_001"
+
+    def test_delete_adset_absent_from_json(self, example_campaign, mock_client, state_with_extra_campaign):
+        p = plan(example_campaign, state_with_extra_campaign, mock_client)
+        delete_ops = [op for op in p.operations if isinstance(op, DeleteAdSet)]
+        assert any(op.adset_name == "Stale AdSet" for op in delete_ops)
+
+    def test_delete_ad_absent_from_json(self, example_campaign, mock_client, populated_state):
+        populated_state.upsert_ad(
+            example_campaign["campaigns"][0]["name"],
+            example_campaign["campaigns"][0]["ad_sets"][0]["name"],
+            "Stale Ad", "stale_ad_001", "stale_creative_001", {"name": "Stale Ad", "status": "PAUSED"}
+        )
+        p = plan(example_campaign, populated_state, mock_client)
+        delete_ops = [op for op in p.operations if isinstance(op, DeleteAd)]
+        assert len(delete_ops) == 1
+        assert delete_ops[0].ad_name == "Stale Ad"
+
+    def test_no_deletes_when_json_matches_state(self, example_campaign, mock_client, populated_state):
+        p = plan(example_campaign, populated_state, mock_client)
+        assert not p.has_deletes
+
+    def test_has_deletes_true_when_campaign_removed(self, example_campaign, mock_client, state_with_extra_campaign):
+        p = plan(example_campaign, state_with_extra_campaign, mock_client)
+        assert p.has_deletes
+
+    def test_delete_ops_come_after_create_update_ops(self, example_campaign, mock_client, state_with_extra_campaign):
+        # Add a new adset so there are creates too
+        example_campaign["campaigns"][0]["ad_sets"].append({
+            "name": "New AdSet", "status": "PAUSED", "daily_budget": 1000,
+            "billing_event": "LINK_CLICKS", "optimization_goal": "LINK_CLICKS",
+            "targeting": {"age_min": 18, "age_max": 65, "geo_locations": {"countries": ["US"]}},
+            "ads": []
+        })
+        p = plan(example_campaign, state_with_extra_campaign, mock_client)
+        create_indices = [i for i, op in enumerate(p.operations) if isinstance(op, (CreateCampaign, CreateAdSet, CreateAd))]
+        delete_indices = [i for i, op in enumerate(p.operations) if isinstance(op, (DeleteCampaign, DeleteAdSet, DeleteAd))]
+        assert create_indices and delete_indices
+        assert max(create_indices) < min(delete_indices)
+
+    def test_delete_leaf_first_order(self, example_campaign, mock_client, state_with_extra_campaign):
+        p = plan(example_campaign, state_with_extra_campaign, mock_client)
+        delete_ops = [op for op in p.operations if isinstance(op, (DeleteCampaign, DeleteAdSet, DeleteAd))]
+        types = [type(op).__name__ for op in delete_ops]
+        # Ads before adsets before campaigns
+        if "DeleteCampaign" in types and "DeleteAdSet" in types:
+            assert types.index("DeleteAdSet") < types.index("DeleteCampaign")
+
+
+# ------------------------------------------------------------------
+# apply() — delete execution
+# ------------------------------------------------------------------
+
+class TestApplyDeletes:
+    def test_apply_calls_delete_campaign(self, example_campaign, mock_client, state_with_extra_campaign, tmp_path):
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            p = plan(example_campaign, state_with_extra_campaign, mock_client)
+            result = apply(p, mock_client, state_with_extra_campaign)
+        mock_client.delete_campaign.assert_called_with("stale_camp_001")
+        assert result.ok
+
+    def test_apply_removes_campaign_from_state(self, example_campaign, mock_client, state_with_extra_campaign, tmp_path):
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            p = plan(example_campaign, state_with_extra_campaign, mock_client)
+            apply(p, mock_client, state_with_extra_campaign)
+        assert state_with_extra_campaign.get_campaign_id("Stale Campaign") is None
+
+    def test_apply_calls_delete_adset(self, example_campaign, mock_client, state_with_extra_campaign, tmp_path):
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            p = plan(example_campaign, state_with_extra_campaign, mock_client)
+            result = apply(p, mock_client, state_with_extra_campaign)
+        mock_client.delete_adset.assert_called_with("stale_adset_001")
+        assert result.ok
+
+    def test_apply_delete_continues_after_failure(self, example_campaign, mock_client, state_with_extra_campaign, tmp_path):
+        mock_client.delete_campaign.side_effect = Exception("API error")
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            p = plan(example_campaign, state_with_extra_campaign, mock_client)
+            result = apply(p, mock_client, state_with_extra_campaign)
+        assert len(result.failed) > 0
