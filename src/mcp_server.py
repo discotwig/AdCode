@@ -404,6 +404,16 @@ async def _ingest_excel(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+def _to_plain(obj):
+    """Recursively convert Facebook SDK Mapping/sequence objects to plain Python types."""
+    import collections.abc
+    if isinstance(obj, collections.abc.Mapping):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_plain(v) for v in obj]
+    return obj
+
+
 async def _import_adsets(args: dict) -> list[TextContent]:
     account_id = args["account_id"]
     json_path = args["json_path"]
@@ -442,7 +452,7 @@ async def _import_adsets(args: dict) -> list[TextContent]:
         for field in ("daily_budget", "lifetime_budget", "billing_event", "optimization_goal",
                       "bid_strategy", "targeting"):
             if live.get(field) is not None:
-                adset_entry[field] = live[field]
+                adset_entry[field] = _to_plain(live[field])
 
         idx = campaigns_by_name[parent]
         campaign_json["campaigns"][idx].setdefault("ad_sets", [])
