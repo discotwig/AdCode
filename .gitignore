@@ -1,5 +1,6 @@
 # Environment
 .env
+customers/*/.env
 
 # State lock files (state JSON files are committed; lock files are not)
 state/*.lock

@@ -26,6 +26,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Set by --config at startup; None means use repo-root defaults.
+_state_dir: Path | None = None
+_campaigns_dir: Path | None = None
+
 app = Server("adcode")
 
 
@@ -323,7 +327,7 @@ async def _plan_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
     p = plan(campaign_json, state, meta)
 
     diff_section = _format_plan(p) if len(p) > 0 else "No changes — Facebook already matches this configuration."
@@ -341,7 +345,7 @@ async def _apply_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
     p = plan(campaign_json, state, meta)
 
     if len(p) == 0:
@@ -375,7 +379,7 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
     live_campaigns = meta.list_campaigns(account_id)
 
     paused = []
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
 
     for c in live_campaigns:
         fb_id = c["id"]
@@ -400,7 +404,7 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
 async def _get_local_state(args: dict) -> list[TextContent]:
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
     campaign_name_filter = args.get("campaign_name", "").lower()
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
 
     campaigns = state.campaigns()
     if campaign_name_filter:
@@ -422,7 +426,7 @@ async def _get_campaign_status(args: dict) -> list[TextContent]:
 async def _get_drift_report(args: dict) -> list[TextContent]:
     account_id = args["account_id"]
     meta = _get_meta_client()
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
     return [TextContent(type="text", text=format_report(report))]
@@ -468,7 +472,7 @@ async def _import_adsets(args: dict) -> list[TextContent]:
     name_filter = set(args["adset_names"]) if args.get("adset_names") else None
 
     meta = _get_meta_client()
-    state = StateFile.load(account_id)
+    state = StateFile.load(account_id, state_dir=_state_dir)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
 
@@ -567,6 +571,19 @@ async def _find_duplicates(args: dict) -> list[TextContent]:
 # Entry point
 # ------------------------------------------------------------------
 
+def _load_customer_config(config_path: str) -> None:
+    global _state_dir, _campaigns_dir
+    path = Path(config_path).resolve()
+    with open(path, encoding="utf-8") as f:
+        config = json.load(f)
+    base = path.parent
+    _state_dir = base / config.get("state_dir", "state")
+    _campaigns_dir = base / config.get("campaigns_dir", "campaigns")
+    if config.get("account_id") and not os.environ.get("FB_ACCOUNT_ID"):
+        os.environ["FB_ACCOUNT_ID"] = config["account_id"]
+    logger.info("Loaded customer config: slug=%s account=%s", config.get("customer_slug"), config.get("account_id"))
+
+
 async def _main():
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
@@ -574,6 +591,10 @@ async def _main():
 
 def main():
     import asyncio
+    if "--config" in sys.argv:
+        idx = sys.argv.index("--config")
+        if idx + 1 < len(sys.argv):
+            _load_customer_config(sys.argv[idx + 1])
     asyncio.run(_main())
 
 

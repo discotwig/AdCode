@@ -8,22 +8,26 @@ STATE_DIR = Path(__file__).parent.parent.parent / "state"
 
 
 class StateFile:
-    def __init__(self, account_id: str, data: dict | None = None):
+    def __init__(self, account_id: str, data: dict | None = None, state_dir: Path | None = None):
         self.account_id = account_id
         self._data: dict = data or {"account_id": account_id, "last_pushed_at": "", "campaigns": {}}
+        self._state_dir: Path | None = state_dir  # None → fall through to STATE_DIR at call time
 
     @classmethod
-    def load(cls, account_id: str) -> "StateFile":
-        path = STATE_DIR / f"{account_id}.json"
+    def load(cls, account_id: str, state_dir: Path | None = None) -> "StateFile":
+        _dir = state_dir if state_dir is not None else STATE_DIR
+        path = _dir / f"{account_id}.json"
         if not path.exists():
-            return cls(account_id)
+            return cls(account_id, state_dir=state_dir)
         with open(path, encoding="utf-8") as f:
-            return cls(account_id, json.load(f))
+            return cls(account_id, json.load(f), state_dir=state_dir)
 
     def save(self) -> None:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        # Resolve at call time so test patches of STATE_DIR still work when state_dir is None.
+        _dir = self._state_dir if self._state_dir is not None else STATE_DIR
+        _dir.mkdir(parents=True, exist_ok=True)
         self._data["last_pushed_at"] = datetime.now(timezone.utc).isoformat()
-        path = STATE_DIR / f"{self.account_id}.json"
+        path = _dir / f"{self.account_id}.json"
         tmp_path = path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._data, f, indent=2)

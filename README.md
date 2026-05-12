@@ -42,20 +42,33 @@ cd AdCode
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Create a customer directory
+
+Each client gets their own isolated directory with credentials, campaigns, and state. Use the onboarding script to scaffold it:
 
 ```bash
-cp .env.example .env
-# Fill in FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, FB_ACCOUNT_ID, ANTHROPIC_API_KEY
+python scripts/new_customer.py <slug> <account_id>
+# e.g. python scripts/new_customer.py acme-marketing act_123456789
 ```
 
-Facebook credentials: create a System User in your Meta Business Manager, grant it access to the ad account, and generate a token with `ads_management` permission.
+This creates `customers/<slug>/` with a `config.json`, `.env.example`, and empty `campaigns/` and `state/` directories.
 
-### 3. Start the MCP server
+### 3. Configure credentials
 
 ```bash
-python src/mcp_server.py
+cp customers/<slug>/.env.example customers/<slug>/.env
+# Fill in FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, ANTHROPIC_API_KEY
 ```
+
+Facebook credentials: create a System User in Meta Business Manager, grant it access to the ad account, and generate a token with `ads_management` permission. The `account_id` is already set in `config.json` — no `FB_ACCOUNT_ID` needed in `.env`.
+
+### 4. Start the MCP server
+
+```bash
+python src/mcp_server.py --config customers/<slug>/config.json
+```
+
+The `--config` flag scopes the server to that customer's campaigns and state directory. Without it, the server falls back to repo-root `campaigns/` and `state/` (useful for development).
 
 Point your MCP-compatible model at the server. The tool surface is described below.
 
@@ -127,7 +140,9 @@ customers/
     state/
 ```
 
-A server instance started in `customers/acme/` can only reach Acme's account and data. It has no path or credentials for any other client. See ADR-008 for the full design.
+A server instance started with `--config customers/acme/config.json` can only reach Acme's account and data — it has no path or credentials for any other client.
+
+Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the full design.
 
 ## Connecting Gemini (or any MCP-compatible model)
 

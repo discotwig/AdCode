@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://adcode/schemas/customer_config.schema.json",
+  "title": "AdCode Customer Config",
+  "description": "Per-customer configuration for a single MCP server instance. Paths are relative to the config file's directory.",
+  "type": "object",
+  "required": ["customer_slug", "account_id"],
+  "additionalProperties": false,
+  "properties": {
+    "customer_slug": {
+      "type": "string",
+      "description": "Stable human-readable identifier for this customer (e.g. acme-marketing).",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "account_id": {
+      "type": "string",
+      "description": "Facebook ad account ID in act_XXXXXXXXX format.",
+      "pattern": "^act_[0-9]+$"
+    },
+    "campaigns_dir": {
+      "type": "string",
+      "description": "Directory containing campaign JSON files, relative to this config file. Defaults to 'campaigns'.",
+      "default": "campaigns"
+    },
+    "state_dir": {
+      "type": "string",
+      "description": "Directory for state files, relative to this config file. Defaults to 'state'.",
+      "default": "state"
+    }
+  }
+}
