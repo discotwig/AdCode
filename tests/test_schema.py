@@ -75,10 +75,10 @@ class TestCampaignSchema:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"account_id": "act_123", "campaigns": []}, campaign_schema)
 
-    def test_invalid_objective_fails(self, campaign_schema, example_campaign):
+    def test_legacy_objective_is_valid(self, campaign_schema, example_campaign):
+        # Schema accepts legacy Facebook objectives for campaigns imported from Ads Manager
         example_campaign["campaigns"][0]["objective"] = "LINK_CLICKS"
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(example_campaign, campaign_schema)
+        jsonschema.validate(example_campaign, campaign_schema)  # must not raise
 
     def test_invalid_status_fails(self, campaign_schema, example_campaign):
         example_campaign["campaigns"][0]["status"] = "RUNNING"
@@ -105,10 +105,10 @@ class TestCampaignSchema:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(example_campaign, campaign_schema)
 
-    def test_empty_ad_sets_fails(self, campaign_schema, example_campaign):
+    def test_empty_ad_sets_is_valid(self, campaign_schema, example_campaign):
+        # Campaigns imported from Facebook may have no ad sets tracked yet
         example_campaign["campaigns"][0]["ad_sets"] = []
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(example_campaign, campaign_schema)
+        jsonschema.validate(example_campaign, campaign_schema)  # must not raise
 
     def test_invalid_billing_event_fails(self, campaign_schema, example_campaign):
         example_campaign["campaigns"][0]["ad_sets"][0]["billing_event"] = "CLICKS"
