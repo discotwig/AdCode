@@ -295,3 +295,24 @@ The client-facing interface for the contractor service model. Clients send media
 - [x] **Resend domain verification** — `ryanbishop.me` verified; SPF/DKIM/DMARC records in Cloudflare DNS
 - [x] **Fly.io app** — app `adcode` deployed; volume `adcode_data` mounted at `/app/customers`; all secrets set
 - [x] **Cloudflare DNS** — A/AAAA records for `api.ryanbishop.me` pointing to Fly.io; TLS cert issued by Let's Encrypt via `flyctl certs add`
+
+---
+
+## Phase 15 — Pending Brief Durability
+
+Pending files (`.pending_{id}.json`) are stored on the Fly.io volume and lost if the machine restarts before the operator replies GO/HOLD. A brief submitted minutes before a deploy or machine restart is silently discarded — the client and operator both get no notification.
+
+### Problem
+
+- Fly.io machines restart on every `flyctl deploy` (rolling restart)
+- Pending files in `state/` survive restarts (they're on the volume) ✓
+- But if a restart happens *between* the operator receiving the plan email and replying, the pending file still exists on the volume — so this is actually less of a problem than it seemed
+- The real risk: if the volume is destroyed or the app is redeployed to a new machine with a fresh volume, all pending files are lost with no notification
+
+### Solution
+
+- [ ] **Pending file expiry check** — on startup, scan all `state/.pending_*.json` files; any older than 24 hours should trigger an operator notification email listing the expired briefs so they can be re-requested
+- [ ] **Startup scan in `email_bot.py`** — add a FastAPI `startup` event handler that calls `_scan_expired_pending()` on boot
+- [ ] **`_scan_expired_pending()`** — load all customer configs; for each, scan `state_dir` for `.pending_*` files; if `created_at` is >24h ago, send operator an email listing the brief (client, subject, created_at) and delete the pending file
+- [ ] **Operator notification template** — subject: `[AdCode] Expired brief: {client_subject}`; body lists what was lost and asks operator to request re-send from client if needed
+- [ ] **Write `tests/test_pending_expiry.py`** — test that expired files trigger operator notification; test that non-expired files are left alone; test with multiple customers

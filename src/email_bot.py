@@ -13,7 +13,7 @@ import os
 import sys
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import anthropic
 from dotenv import dotenv_values, load_dotenv
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 
 from src.api.meta import MetaClient
@@ -39,7 +40,65 @@ logger = logging.getLogger(__name__)
 CUSTOMERS_DIR = _REPO_ROOT / "customers"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-app = FastAPI()
+PENDING_EXPIRY_HOURS = 24
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    try:
+        _scan_expired_pending()
+    except Exception:
+        logger.exception("Expired pending scan failed on startup")
+    yield
+
+
+app = FastAPI(lifespan=_lifespan)
+
+
+# ------------------------------------------------------------------
+# Startup — expired pending brief sweep
+# ------------------------------------------------------------------
+
+
+def _scan_expired_pending():
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=PENDING_EXPIRY_HOURS)
+    configs = _load_all_configs()
+    for customer in configs:
+        config_dir: Path = customer["_config_dir"]
+        env: dict = customer["_env"]
+        state_dir = config_dir / customer.get("state_dir", "state")
+        bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
+        operator_email = customer.get("operator_email", "")
+        resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
+
+        for pending_path in sorted(state_dir.glob(".pending_*.json")):
+            try:
+                pending = json.loads(pending_path.read_text(encoding="utf-8"))
+                created_at = datetime.fromisoformat(pending["created_at"])
+                if created_at >= cutoff:
+                    continue
+                # Expired — notify operator and clean up
+                client_from = pending.get("client_from", "unknown")
+                client_subject = pending.get("client_subject", "(no subject)")
+                created_str = created_at.strftime("%Y-%m-%d %H:%M UTC")
+                body = (
+                    f"A pending brief expired without a GO/HOLD response and was discarded.\n\n"
+                    f"From: {client_from}\n"
+                    f"Subject: {client_subject}\n"
+                    f"Received: {created_str}\n\n"
+                    f"If this brief should be actioned, ask the client to resend."
+                )
+                if operator_email and resend_key:
+                    send_email(EmailMessage(
+                        from_=bot_email,
+                        to=operator_email,
+                        subject=f"[AdCode] Expired brief: {client_subject}",
+                        html=body.replace("\n", "<br>"),
+                    ), resend_key)
+                pending_path.unlink()
+                logger.info("Expired pending_id=%s from=%s", pending.get("pending_id"), client_from)
+            except Exception:
+                logger.exception("Failed to process expired pending file %s", pending_path)
 
 
 # ------------------------------------------------------------------
