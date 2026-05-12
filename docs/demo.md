@@ -2,18 +2,15 @@
 
 A step-by-step walkthrough to demonstrate AdCode to a client. All campaigns are created as `PAUSED` — no ads serve, no budget is spent.
 
+AdCode follows the same model as AWS CloudFormation: **the JSON file is the desired state, and AdCode makes Facebook match it exactly.** Campaigns are created when you add them to the file, updated when you change a field, and deleted when you remove them. `preview_diff` is `terraform plan`. `push_campaigns` is `terraform apply`.
+
 ## Before you start
 
-**One-time setup in the demo files:**
-
-Open `campaigns/demo_v1.json` and `campaigns/demo_v2.json` and replace both placeholder values:
+The demo account ID (`act_366643171197739`) is already set in both files. The only placeholder you may need to replace is `REPLACE_WITH_PAGE_ID` in `demo_v2.json` if you run Tests 5–6 (it's pre-filled in `demo_v1.json`).
 
 | Placeholder | Where to find it |
 |---|---|
-| `REPLACE_WITH_ACCOUNT_ID` | Facebook Business Manager → Business Settings → Ad Accounts. Prefix with `act_`, e.g. `act_366643171197739` |
-| `REPLACE_WITH_PAGE_ID` | Facebook Business Manager → Business Settings → Pages. It's the numeric ID shown under the page name. |
-
-Save both files. You can commit them — the placeholders are the only thing you need to change.
+| `REPLACE_WITH_PAGE_ID` | Facebook Business Manager → Business Settings → Pages. Numeric ID shown under the page name. |
 
 ---
 
@@ -21,8 +18,8 @@ Save both files. You can commit them — the placeholders are the only thing you
 
 | File | Purpose |
 |---|---|
-| `campaigns/demo_v1.json` | Initial campaign: 1 campaign, 1 ad set (US 25-44), $10/day budget |
-| `campaigns/demo_v2.json` | Updated campaign: budget raised to $20/day + a second ad set added (US 45-64) |
+| `campaigns/demo/act_366643171197739/demo_v1.json` | Initial desired state: 4 campaigns — one fully built (1 ad set, 1 ad, $10/day), three stub campaigns with no ad sets |
+| `campaigns/demo/act_366643171197739/demo_v2.json` | Updated desired state: only the primary campaign, with a budget increase and a second ad set added — the 3 stubs are intentionally removed |
 
 ---
 
@@ -31,30 +28,34 @@ Save both files. You can commit them — the placeholders are the only thing you
 **What it shows:** Pre-flight checks catch problems before anything touches Facebook.
 
 Ask Claude:
-> *"Validate campaigns/demo_v1.json"*
+> *"Validate campaigns/demo/act_366643171197739/demo_v1.json"*
 
-**Expected result:** A summary with schema status (pass) and AI policy review. If `REPLACE_WITH_PAGE_ID` is still in the file, it flags it as an error — demonstrating the guard rail works.
+**Expected result:** Schema passes. AI policy review runs and confirms the creative and targeting are within policy.
 
-**Talking point for client:** *"Before we ever call the API, the system checks the JSON against Facebook's ad policies using AI. Traffickers get feedback in seconds instead of waiting for Facebook to reject the creative."*
+**Talking point for client:** *"Before we ever call the API, the system validates the JSON against Facebook's ad policies using AI. Traffickers get feedback in seconds instead of waiting for Facebook to reject the creative."*
 
 ---
 
 ## Test 2 — Preview the diff (no API calls)
 
-**What it shows:** Safe dry-run before committing to any changes.
+**What it shows:** The full changeset before any API call. This is `terraform plan`.
 
 Ask Claude:
-> *"Preview the diff for campaigns/demo_v1.json"*
+> *"Preview the diff for campaigns/demo/act_366643171197739/demo_v1.json"*
 
 **Expected result:**
 ```
-Plan: 3 operations
-  CREATE campaign  AdCode Demo — Brand Awareness
-  CREATE ad set    US 25-44 — Broad
-  CREATE ad        Demo Ad — Headline v1
+Plan: 4 CreateCampaign, 1 CreateAdSet, 1 CreateAd
+
+  CreateCampaign: AdCode Demo — Brand Awareness
+  CreateAdSet: AdCode Demo — Brand Awareness
+  CreateAd: AdCode Demo — Brand Awareness
+  CreateCampaign: My campaign 1017
+  CreateCampaign: Test API Campaign 1
+  CreateCampaign: Atlanta Debut
 ```
 
-**Talking point for client:** *"This is the equivalent of `terraform plan`. You see exactly what will be created or updated — zero surprises."*
+**Talking point for client:** *"This is the equivalent of* `terraform plan`*. You see exactly what will be created, updated, or deleted — zero surprises. Nothing has happened yet."*
 
 ---
 
@@ -63,13 +64,13 @@ Plan: 3 operations
 **What it shows:** End-to-end push to the live Facebook API.
 
 Ask Claude:
-> *"Push campaigns/demo_v1.json"*
+> *"Push campaigns/demo/act_366643171197739/demo_v1.json"*
 
-**Expected result:** 3 objects created (campaign, ad set, ad). A state file is written to `state/act_XXXXXXXXX.json` containing the Facebook-assigned IDs.
+**Expected result:** 4 campaigns created (one with an ad set and ad, three stubs). A state file is written to `state/act_366643171197739.json` containing the Facebook-assigned IDs.
 
-Open Facebook Ads Manager side-by-side to show the campaign appear in real time.
+Open Facebook Ads Manager side-by-side to show the campaigns appear in real time.
 
-**Talking point for client:** *"The campaign is live in Ads Manager — but PAUSED, so nothing runs until you're ready. The state file in Git is now the source of truth for IDs."*
+**Talking point for client:** *"The campaigns are live in Ads Manager — but PAUSED, so nothing runs until you're ready. The state file in Git is now the source of truth for Facebook IDs. That file is what makes idempotency and safe deletes possible."*
 
 ---
 
@@ -78,38 +79,42 @@ Open Facebook Ads Manager side-by-side to show the campaign appear in real time.
 **What it shows:** Running it twice doesn't create duplicates.
 
 Ask Claude:
-> *"Push campaigns/demo_v1.json again"*
+> *"Push campaigns/demo/act_366643171197739/demo_v1.json again"*
 
 **Expected result:**
 ```
-Plan: 0 operations — nothing to do.
+No changes detected.
 ```
 
-**Talking point for client:** *"Safe to run any time. If nothing changed in the JSON, nothing changes on Facebook."*
+**Talking point for client:** *"Safe to run any time. If nothing changed in the JSON, nothing changes on Facebook. There's no risk of accidental duplicates — the state file tracks every object by ID."*
 
 ---
 
-## Test 5 — Apply a change (budget + new ad set)
+## Test 5 — Unified changeset: update + delete in one operation
 
-**What it shows:** Updating a campaign by editing the JSON file.
+**What it shows:** Removing campaigns from the JSON causes them to be deleted from Facebook — the same way deleting a resource from a CloudFormation template removes it from AWS.
 
 Ask Claude:
-> *"Preview the diff for campaigns/demo_v2.json"*
+> *"Preview the diff for campaigns/demo/act_366643171197739/demo_v2.json"*
 
 **Expected result:**
 ```
-Plan: 2 operations
-  UPDATE ad set    US 25-44 — Broad  (daily_budget: 1000 → 2000)
-  CREATE ad set    US 45-64 — Broad
-  CREATE ad        Demo Ad — Headline v1
+Plan: 1 UpdateAdSet, 1 CreateAdSet, 1 CreateAd, 3 DeleteCampaign
+
+  UpdateAdSet: AdCode Demo — Brand Awareness — fields: ['daily_budget']
+  CreateAdSet: AdCode Demo — Brand Awareness
+  CreateAd: AdCode Demo — Brand Awareness
+  DELETE campaign: "My campaign 1017"  (fb_id: <id>)
+  DELETE campaign: "Test API Campaign 1"  (fb_id: <id>)
+  DELETE campaign: "Atlanta Debut"  (fb_id: <id>)
 ```
 
-Then ask:
-> *"Push campaigns/demo_v2.json"*
+Because the plan includes deletions, pushing requires explicit confirmation. Ask Claude:
+> *"Push campaigns/demo/act_366643171197739/demo_v2.json with confirm_deletes=true"*
 
-**Expected result:** Budget updated, new ad set created. Verify in Ads Manager.
+**Expected result:** Budget updated to $20/day, new ad set (US 45-64) created, 3 stub campaigns deleted. Verify in Ads Manager.
 
-**Talking point for client:** *"Budget changes, new ad sets, copy updates — all done by editing a file and pushing. The diff shows exactly what changed before it happens. The PR history is your audit trail."*
+**Talking point for client:** *"Creates, updates, and deletes all happen in a single operation from a single file. Removing a campaign from the JSON is the only way to delete it — AdCode will never delete something you didn't explicitly remove. And any plan that includes deletions requires you to confirm before it runs."*
 
 ---
 
@@ -119,7 +124,7 @@ Then ask:
 
 1. Go into Facebook Ads Manager and manually rename the campaign or change its status.
 2. Ask Claude:
-   > *"Get the drift report for my account"*
+   > *"Get the drift report for act_366643171197739"*
 
 **Expected result:**
 ```
@@ -127,7 +132,7 @@ FIELD_MISMATCH  campaign  AdCode Demo — Brand Awareness
   name: expected "AdCode Demo — Brand Awareness", got "My Manual Edit"
 ```
 
-**Talking point for client:** *"If anyone goes rogue in Ads Manager, the drift report catches it immediately. You always know when your live account has diverged from what's in Git."*
+**Talking point for client:** *"If anyone goes rogue in Ads Manager, the drift report catches it immediately. You always know when the live account has diverged from what's in Git. The fix is to push the JSON again — AdCode restores the desired state."*
 
 ---
 
@@ -140,25 +145,26 @@ Ask Claude:
 
 **Expected result:** Full state file JSON with all Facebook IDs, returned instantly with no API call.
 
-**Talking point for client:** *"Auditing what's deployed costs zero API calls. The state file in Git is always available."*
+**Talking point for client:** *"Auditing what's deployed costs zero API calls. The state file in Git is always available — no rate limits, no latency."*
 
 ---
 
 ## Cleanup after the demo
 
-Delete the test campaigns to keep your ad account clean:
+The state file now tracks the remaining campaign from `demo_v2.json`. To tear it down, remove all campaigns from the JSON (or delete `state/act_366643171197739.json` manually) and push with an empty campaigns list.
 
 Ask Claude:
-> *"Pause all campaigns with 'AdCode Demo' in the name"*
+> *"Push campaigns/demo/act_366643171197739/demo_v2.json with an empty campaigns array and confirm_deletes=true"*
 
-Then delete them manually in Ads Manager, or ask me to add a `delete_campaigns` tool if you want it automated.
+Or delete the objects directly in Ads Manager — AdCode won't recreate anything that isn't in the JSON.
 
 ---
 
 ## Key messages for the client
 
-1. **Git is the audit trail.** Every change is a commit. Who changed what and when is always answerable.
-2. **PRs are the review mechanism.** Budget changes, targeting updates, copy edits — all reviewed before they go live.
-3. **No one needs to log into Ads Manager for routine trafficking.** The MCP tools handle it via natural language.
-4. **AI policy review before every push.** Catch rejections before Facebook does.
-5. **Drift detection keeps the account honest.** Manual changes in Ads Manager are surfaced immediately.
+1. **The JSON is the desired state.** Add a campaign to create it. Change a field to update it. Remove it to delete it. AdCode makes Facebook match the file — exactly.
+2. **Git is the audit trail.** Every change is a commit. Who changed what and when is always answerable.
+3. **PRs are the review mechanism.** Budget changes, targeting updates, copy edits — all reviewed before they go live.
+4. **No one needs to log into Ads Manager for routine trafficking.** The MCP tools handle it via natural language.
+5. **AI policy review before every push.** Catch rejections before Facebook does.
+6. **Drift detection keeps the account honest.** Manual changes in Ads Manager are surfaced immediately. The fix is always to push the JSON.

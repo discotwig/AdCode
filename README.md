@@ -1,15 +1,26 @@
 # AdCode
 
-Infrastructure-as-code for ad campaign trafficking. Campaign definitions live as JSON in this repository. A script reads the JSON, calls the Facebook Marketing API, and writes a state file with returned IDs back to the repo.
+Infrastructure-as-code for ad campaign trafficking. The JSON file is the desired state. AdCode makes Facebook match it — exactly.
 
 Git history is the audit trail. Pull requests are the review mechanism. No one needs to log into Facebook Ads Manager for routine trafficking or QA.
 
 ## How it works
 
-1. Define campaigns in `campaigns/<account>.json` using the schema in `schemas/campaign.schema.json`
-2. Run `preview_diff` to see what will change before any API call is made
-3. Run `push_campaigns` to apply — the engine creates, updates, **or deletes** objects so Facebook matches the file exactly, then writes `state/<account>.json`
-4. Run `get_drift_report` to verify actuals match state after any manual changes
+AdCode follows the same model as AWS CloudFormation or Terraform:
+
+| Concept | AdCode equivalent |
+|---|---|
+| Template | Campaign JSON file (`campaigns/<slug>/<account>/file.json`) |
+| Stack state | `state/<account>.json` — maps every managed object to its Facebook ID |
+| Changeset | `preview_diff` output — creates, updates, and deletes shown together |
+| Apply | `push_campaigns` — makes Facebook match the JSON, then updates the state file |
+
+**The full lifecycle in four steps:**
+
+1. **Define** — write or edit a campaign JSON file. Add a campaign to create it. Change a field to update it. Remove a campaign to delete it.
+2. **Preview** — run `preview_diff` to see the exact changeset before any API call is made. Deletions are called out explicitly and require confirmation to apply.
+3. **Apply** — run `push_campaigns`. Creates, updates, and deletes are applied in a single operation. The state file in Git is updated to reflect what's live.
+4. **Audit** — run `get_drift_report` to detect if anyone made manual changes in Ads Manager that diverge from the state file.
 
 The core scripts are exposed as MCP tools. Connect your model (Gemini, Claude, etc.) to the MCP server and interact via natural language.
 
@@ -80,7 +91,7 @@ The structure mirrors Facebook's object hierarchy: campaign → ad set → ad �
 
 ## Excel ingestion
 
-If you have an Excel brief, use the `validate_campaigns` tool with an Excel path and the AI will extract campaign definitions against the schema, flag ambiguities, and return JSON ready for review. Commit the JSON after reviewing ambiguities — do not re-ingest from Excel after the JSON is committed.
+If you have an Excel brief, use the `ingest_excel` tool with an Excel path and the AI will extract campaign definitions against the schema, flag ambiguities, and return JSON ready for review. Commit the JSON after reviewing ambiguities — do not re-ingest from Excel after the JSON is committed.
 
 ## Connecting Gemini (or any MCP-compatible model)
 
@@ -148,7 +159,7 @@ configure_logging()
 pytest tests/
 ```
 
-168 tests, all local with mocks. Should pass out of the box.
+185 tests, all local with mocks. Should pass out of the box.
 
 ### Integration tests (Facebook sandbox)
 
