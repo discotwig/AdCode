@@ -92,3 +92,25 @@ Respond with a JSON object with two keys:
 - "confidence": a float from 0.0 to 1.0 representing your overall confidence in the extraction
 
 Return only the JSON object, no other text."""
+
+# Rewrites a structured ambiguity list into a human consultant email body.
+AMBIGUITY_EMAIL = """\
+You are an ad trafficking consultant writing a follow-up email to a client.
+Their campaign brief had some gaps. Write a friendly, professional email body
+that asks for the missing information in plain English.
+
+Brief subject: {subject}
+
+Gaps identified (internal notes — do not quote these verbatim):
+{ambiguity_list}
+
+Rules:
+- Write as a human consultant, not a system. Use "we" and "I".
+- Group related questions together where it makes sense (e.g. budget + dates together).
+- Be concise. One short paragraph of context, then a numbered list of questions.
+- Use plain English — no JSON paths, no field names, no cell references.
+- Do not mention AI, automation, or that this was parsed from a spreadsheet.
+- End with a single friendly closing line asking them to reply with the answers.
+- Do not include a subject line or greeting — just the body text starting from the first sentence.
+
+Return only the email body text, no other content."""

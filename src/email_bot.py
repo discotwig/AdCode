@@ -27,7 +27,8 @@ from fastapi import FastAPI, Request, HTTPException
 
 from src.api.meta import MetaClient
 from src.services.email import send_email, EmailMessage
-from src.services.ingest import read_excel, extract_campaigns, format_ambiguity_report
+from src.services.ingest import read_excel, extract_campaigns
+from src.prompts import AMBIGUITY_EMAIL
 from src.services.brief import extract_from_text
 from src.services.state import StateFile
 from src.services.validate import validate_all
@@ -244,12 +245,19 @@ async def _handle_inbound(parsed: dict, customer: dict):
         return
 
     if ingest_result.ambiguities:
-        ambiguity_text = format_ambiguity_report(ingest_result)
-        _reply_client(
-            "We received your brief but have some questions before proceeding:\n\n"
-            + ambiguity_text
-            + "\n\nPlease reply with clarifications."
+        ambiguity_list = "\n".join(
+            f"- {a.question}" for a in ingest_result.ambiguities
         )
+        consultant_prompt = AMBIGUITY_EMAIL.format(
+            subject=subject,
+            ambiguity_list=ambiguity_list,
+        )
+        amb_response = ai_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": consultant_prompt}],
+        )
+        _reply_client(amb_response.content[0].text.strip())
         return
 
     campaign_json = {"account_id": account_id, "campaigns": ingest_result.campaigns}
