@@ -12,6 +12,23 @@ This maps onto how agencies already buy ad trafficking — as a contractor engag
 
 The operator is the human in the loop. Every push goes through a plan-review step before `apply_campaigns` runs. The operator approves the plan; the software executes it. See ADR-008 for the full design rationale.
 
+## Email bot
+
+Clients interact with AdCode entirely by email — no logins, no dashboards.
+
+```
+Client → traffic@ryanbishop.me → Cloudflare Email Worker
+  → api.ryanbishop.me/inbound (Fly.io)
+  → Claude extracts campaign JSON
+  → Operator receives plan email
+  → Operator replies GO → apply → client confirmation
+                    HOLD → client notified, brief discarded
+```
+
+Attach an Excel brief or write the campaign description in plain text. The AI extracts campaign definitions, validates against Facebook policy, and generates a plan. If anything is ambiguous, the client gets a list of questions before the plan is generated.
+
+The email bot runs as a FastAPI service on Fly.io. See ADR-009 for architecture decisions and `docs/email-worker-runbook.md` for operational procedures.
+
 ## How it works
 
 AdCode follows the same model as AWS CloudFormation or Terraform:
@@ -123,7 +140,7 @@ If you have an Excel brief, use the `ingest_excel` tool with an Excel path and t
 
 Each client gets their own server process, working directory, and credentials. MCP has no built-in auth — isolation is achieved through process boundaries, not middleware.
 
-```
+```text
 customers/
   acme/
     config.json        ← account_id, data paths (committed)
@@ -210,7 +227,7 @@ configure_logging()
 pytest tests/
 ```
 
-185 tests, all local with mocks. Should pass out of the box.
+214 tests, all local with mocks. Should pass out of the box.
 
 ### Integration tests (Facebook sandbox)
 

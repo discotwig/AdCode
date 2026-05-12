@@ -290,8 +290,8 @@ The client-facing interface for the contractor service model. Clients send media
 
 ### Deployment (one-time operator steps)
 
-- [ ] **Cloudflare Email Routing** — enable on `ryanbishop.me`; add route `traffic@ryanbishop.me` → Email Worker
-- [ ] **Deploy Email Worker** — `wrangler deploy src/workers/inbound.js`; set `WEBHOOK_URL` and `WEBHOOK_SECRET` secrets
-- [ ] **Resend domain verification** — add `ryanbishop.me` to Resend; add SPF/DKIM/DMARC records to Cloudflare DNS
-- [ ] **Fly.io app** — `flyctl launch --no-deploy`; `flyctl volumes create adcode_data --size 1 --region iad`; `flyctl secrets set WEBHOOK_SECRET=... RESEND_API_KEY=...`; `flyctl deploy`
-- [ ] **Cloudflare DNS** — add CNAME `api.ryanbishop.me` → Fly.io app hostname
+- [x] **Cloudflare Email Routing** — enabled on `ryanbishop.me`; route `traffic@ryanbishop.me` → `adcode-inbound` worker
+- [x] **Deploy Email Worker** — deployed via Cloudflare dashboard; `WEBHOOK_URL` and `WEBHOOK_SECRET` secrets set
+- [x] **Resend domain verification** — `ryanbishop.me` verified; SPF/DKIM/DMARC records in Cloudflare DNS
+- [x] **Fly.io app** — app `adcode` deployed; volume `adcode_data` mounted at `/app/customers`; all secrets set
+- [x] **Cloudflare DNS** — A/AAAA records for `api.ryanbishop.me` pointing to Fly.io; TLS cert issued by Let's Encrypt via `flyctl certs add`
