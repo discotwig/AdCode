@@ -157,7 +157,7 @@ async def _handle_inbound(parsed: dict, customer: dict):
     def _reply_client(body_text: str):
         send_email(EmailMessage(
             from_=bot_email,
-            to=from_addr,
+            to=_bare_email(from_addr),
             subject=f"Re: {subject}",
             html=body_text.replace("\n", "<br>"),
             reply_to=bot_email,
@@ -278,7 +278,7 @@ async def _handle_operator_reply(parsed: dict, customer: dict):
     def _reply_client(body_text: str):
         send_email(EmailMessage(
             from_=bot_email,
-            to=client_from,
+            to=_bare_email(client_from),
             subject=f"Re: {client_subject}",
             html=body_text.replace("\n", "<br>"),
             in_reply_to=pending.get("message_id") or None,
@@ -346,6 +346,10 @@ async def inbound_webhook(request: Request):
     parsed = _parse_raw_email(raw)
     bare_from = _bare_email(from_addr)
     operator_email = customer.get("operator_email", "").lower()
+
+    # Ensure parsed["from"] is never empty — fall back to the webhook envelope address
+    if not parsed["from"]:
+        parsed["from"] = from_addr
 
     if bare_from == operator_email and "[AdCode Review]" in parsed["subject"]:
         await _handle_operator_reply(parsed, customer)

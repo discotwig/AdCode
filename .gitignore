@@ -9,7 +9,6 @@ state/*.lock
 customers/**/state/.pending_*
 
 # OAuth credentials (never commit)
-customers/*/gmail_credentials.json
 customers/*/.gmail_token
 
 # Python
