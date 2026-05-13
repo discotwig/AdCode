@@ -61,6 +61,8 @@ Starting the server with `--config customers/acme/q1_brand/q1_brand_template.jso
 
 ## Quickstart
 
+For a step-by-step walkthrough, see [docs/getting-started.md](docs/getting-started.md).
+
 ### 1. Install
 
 ```bash
@@ -189,6 +191,14 @@ state.json + template fb_id updates -> Git commit
 ```
 
 For more detail, see [docs/architecture.md](docs/architecture.md).
+
+Related design docs:
+
+- [State model](docs/state-model.md)
+- [Provider interface](docs/provider-interface.md)
+- [Roadmap](docs/roadmap.md)
+- [Security policy](SECURITY.md)
+- [Architecture decisions](docs/decisions/README.md)
 
 ## Repository Layout
 

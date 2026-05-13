@@ -1,0 +1,8 @@
+Validation passed. No issues found.
+Pushable: True
+
+Plan: 1 CreateCampaign, 1 CreateAdSet, 1 CreateAd
+
+  CreateCampaign: Summer Sale Traffic
+  CreateAdSet: Summer Sale Traffic
+  CreateAd: Summer Sale Traffic
