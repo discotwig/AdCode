@@ -73,17 +73,19 @@ AdCode follows the same model as AWS CloudFormation or Terraform:
 
 | Concept | AdCode equivalent |
 | --- | --- |
-| Template | Campaign JSON file (`campaigns/<slug>/<account>/file.json`) |
-| Stack state | `state/<account>.json` — maps every managed object to its Facebook ID |
+| Template / Stack | Ad Stack — `campaigns/<name>.json` — declares exactly which campaigns to manage |
+| Stack state | `state/<name>.json` — maps every managed object to its Facebook ID; scoped to this stack only |
 | Changeset | `plan_campaigns` output — validates + shows creates, updates, and deletes |
-| Apply | `apply_campaigns` — makes Facebook match the JSON, then updates the state file |
+| Apply | `apply_campaigns` — makes Facebook match the Ad Stack, then updates the stack state file |
+
+Each Ad Stack is a matched pair: `campaigns/q2_brand.json` ↔ `state/q2_brand.json`. Two Ad Stacks in the same Facebook account are completely independent — applying one cannot delete or drift-detect the other's campaigns. See ADR-012 for the full design.
 
 **The full lifecycle in four steps:**
 
-1. **Define** — write or edit a campaign JSON file. Add a campaign to create it. Change a field to update it. Remove a campaign to delete it.
+1. **Define** — write or edit an Ad Stack file. Add a campaign to create it. Change a field to update it. Remove a campaign to delete it.
 2. **Plan** — run `plan_campaigns` to validate the file and see the exact changeset before any API call is made. Deletions are called out explicitly and require confirmation to apply.
-3. **Apply** — run `apply_campaigns`. Creates, updates, and deletes are applied in a single operation. The state file in Git is updated to reflect what's live.
-4. **Audit** — run `get_drift_report` to detect if anyone made manual changes in Ads Manager that diverge from the state file.
+3. **Apply** — run `apply_campaigns`. Creates, updates, and deletes are applied in a single operation. The stack state file in Git is updated to reflect what's live.
+4. **Audit** — run `get_drift_report` to detect if anyone made manual changes in Ads Manager that diverge from the stack state.
 
 The core scripts are exposed as MCP tools. Connect your model (Gemini, Claude, etc.) to the MCP server and interact via natural language.
 
@@ -131,44 +133,52 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 
 | Tool | Description |
 | --- | --- |
-| `plan_campaigns(json_path)` | Validate a campaign JSON file and show the full changeset (creates, updates, deletes) — no changes made to Facebook. Always run before `apply_campaigns` |
-| `apply_campaigns(json_path, confirm_deletes?)` | Apply a campaign JSON file to Facebook — creates, updates, and deletes. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
+| `plan_campaigns(json_path)` | Validate an Ad Stack file and show the full changeset (creates, updates, deletes) — no changes made to Facebook. Always run before `apply_campaigns` |
+| `apply_campaigns(json_path, confirm_deletes?)` | Apply an Ad Stack to Facebook — creates, updates, and deletes scoped to this stack only. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
 | `list_campaigns(account_id?)` | Fetch all campaigns directly from Facebook — always live, never from the local state file |
-| `pause_campaigns(filter)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly, works for campaigns not tracked in state |
+| `pause_campaigns(filter, json_path?)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly. Pass `json_path` to update the stack state file after pausing |
 | `get_campaign_status(campaign_id)` | Fetch live fields for a single campaign from Facebook by ID |
 | `get_campaign_export(account_id)` | Fetch the full campaign hierarchy (campaigns + ad sets + ads) for an account in one call — always live |
-| `get_drift_report(account_id)` | Compare local state to live Facebook data; report objects missing, untracked, or field-mismatched |
-| `import_adsets(json_path, account_id, name_filter?)` | Adopt ad sets that exist on Facebook but are not tracked in state (MISSING_FROM_STATE items) — the equivalent of `terraform import` for ad sets |
+| `get_drift_report(json_path)` | Compare this Ad Stack's state to live Facebook data; only reports on campaigns declared in this stack |
+| `import_adsets(json_path, account_id, name_filter?)` | Adopt ad sets that exist on Facebook but are not tracked in this stack (MISSING_FROM_STATE items) — the equivalent of `terraform import` for ad sets |
 | `find_duplicates(account_id)` | Find campaigns with duplicate names in the account; returns each name with multiple fb_ids along with created_time and status |
-| `get_local_state(filter?)` | Read the local state file (cache) — shows what AdCode last recorded after a push, not live Facebook state |
+| `get_local_state(json_path)` | Read this Ad Stack's state file — shows what AdCode last recorded after a push, scoped to this stack only |
 | `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI; flags ambiguities for human review |
 
 ## Repository layout
 
 ```text
-campaigns/          JSON campaign definitions (source of truth)
-state/              State files written after push (campaign → Facebook ID mapping)
+customers/
+  <slug>/
+    config.json     Account ID + data paths for the local MCP server
+    .env            Facebook + Anthropic credentials (gitignored)
+    campaigns/
+      <stack>.json  Ad Stack definition — desired state for a named set of campaigns
+    state/
+      <stack>.json  Stack state — Facebook IDs recorded after last apply (matches stack name)
 src/
   api/meta.py       Facebook Marketing API client
   services/
-    state.py        State file read/write
+    state.py        State file read/write (stack-scoped)
     validate.py     Schema and AI policy validation
     ingest.py       Excel → JSON ingestion
   traffic.py        Apply engine
   reconcile.py      Drift detection
   mcp_server.py     MCP server entry point
-schemas/            JSON Schema definitions for campaigns and state files
+schemas/            JSON Schema definitions for Ad Stacks and state files
 tests/              Test suite
 docs/               Architecture decisions, API research, build checklist
 ```
 
-## Campaign JSON format
+## Ad Stack format
 
-See `schemas/campaign.schema.json` for the full schema. A minimal example is in `campaigns/example.json`.
+See `schemas/campaign.schema.json` for the full schema. A minimal example is in `tests/fixtures/example.json`.
 
-The structure mirrors Facebook's object hierarchy: campaign → ad set → ad → creative.
+The structure mirrors Facebook's object hierarchy: campaign → ad set → ad → creative. The top-level `account_id` tells the engine which Facebook account to call against.
 
 Each campaign, ad set, and ad supports an optional `fb_id` field. When present, `plan_campaigns` matches by `fb_id` instead of name, enabling stable tracking through renames. The `import_adsets` tool populates `fb_id` automatically for imported objects.
+
+The stack state file (`state/<name>.json`) is automatically written after each apply and must be committed to Git. It is named to match the Ad Stack file — `campaigns/q2_brand.json` writes its state to `state/q2_brand.json`. Two Ad Stacks for the same Facebook account never share a state file.
 
 ## Excel ingestion
 
@@ -184,10 +194,11 @@ customers/
     config.json        ← account_id, data paths (committed)
     .env               ← FB + Anthropic credentials (gitignored)
     campaigns/
-      act_123456/
-        q1_brand.json
+      q1_brand.json    ← Ad Stack: manages Q1 brand campaigns
+      q2_retail.json   ← Ad Stack: manages Q2 retail campaigns (independent)
     state/
-      act_123456.json
+      q1_brand.json    ← Stack state for q1_brand only
+      q2_retail.json   ← Stack state for q2_retail only
   globex/
     config.json
     .env
@@ -195,9 +206,9 @@ customers/
     state/
 ```
 
-A server instance started with `--config customers/acme/config.json` can only reach Acme's account and data — it has no path or credentials for any other client.
+A server instance started with `--config customers/acme/config.json` can only reach Acme's account and data. Each Ad Stack is isolated — applying `q1_brand.json` cannot affect campaigns tracked by `q2_retail.json`.
 
-Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the full design.
+Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the service model and ADR-012 for the Ad Stack isolation design.
 
 ## Connecting Gemini (or any MCP-compatible model)
 

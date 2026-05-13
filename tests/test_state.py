@@ -143,3 +143,65 @@ class TestToDict:
         assert "campaigns" in d
         serialised = json.dumps(d)
         assert "Summer Sale" in serialised
+
+
+class TestStackName:
+    def test_load_uses_stack_name_for_path(self, tmp_path):
+        data = {
+            "account_id": "act_123",
+            "last_pushed_at": "",
+            "campaigns": {"My Campaign": {"fb_id": "c1", "params": {}, "ad_sets": {}}}
+        }
+        (tmp_path / "my_stack.json").write_text(json.dumps(data))
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            state = StateFile.load("act_123", stack_name="my_stack")
+        assert state.get_campaign_id("My Campaign") == "c1"
+
+    def test_load_ignores_account_id_file_when_stack_name_given(self, tmp_path):
+        data_account = {
+            "account_id": "act_123",
+            "last_pushed_at": "",
+            "campaigns": {"Account Campaign": {"fb_id": "old", "params": {}, "ad_sets": {}}}
+        }
+        data_stack = {
+            "account_id": "act_123",
+            "last_pushed_at": "",
+            "campaigns": {"Stack Campaign": {"fb_id": "new", "params": {}, "ad_sets": {}}}
+        }
+        (tmp_path / "act_123.json").write_text(json.dumps(data_account))
+        (tmp_path / "my_stack.json").write_text(json.dumps(data_stack))
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            state = StateFile.load("act_123", stack_name="my_stack")
+        assert state.get_campaign_id("Stack Campaign") == "new"
+        assert state.get_campaign_id("Account Campaign") is None
+
+    def test_save_uses_stack_name_for_path(self, tmp_path):
+        state = StateFile("act_123", stack_name="my_stack")
+        state.upsert_campaign("My Campaign", "c1", {"name": "My Campaign"})
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            state.save()
+        assert (tmp_path / "my_stack.json").exists()
+        assert not (tmp_path / "act_123.json").exists()
+
+    def test_two_stacks_same_account_are_independent(self, tmp_path):
+        stack_a = StateFile("act_123", stack_name="q2_brand")
+        stack_a.upsert_campaign("Brand Campaign", "c1", {"name": "Brand Campaign"})
+
+        stack_b = StateFile("act_123", stack_name="q2_retail")
+        stack_b.upsert_campaign("Retail Campaign", "c2", {"name": "Retail Campaign"})
+
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            stack_a.save()
+            stack_b.save()
+
+        assert (tmp_path / "q2_brand.json").exists()
+        assert (tmp_path / "q2_retail.json").exists()
+
+        with patch("src.services.state.STATE_DIR", tmp_path):
+            loaded_a = StateFile.load("act_123", stack_name="q2_brand")
+            loaded_b = StateFile.load("act_123", stack_name="q2_retail")
+
+        assert loaded_a.get_campaign_id("Brand Campaign") == "c1"
+        assert loaded_a.get_campaign_id("Retail Campaign") is None
+        assert loaded_b.get_campaign_id("Retail Campaign") == "c2"
+        assert loaded_b.get_campaign_id("Brand Campaign") is None

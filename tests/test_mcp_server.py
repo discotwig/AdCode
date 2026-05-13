@@ -83,11 +83,24 @@ async def test_list_tools_no_retired_tools():
 async def test_apply_campaigns_applies_when_valid(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="example")),
           patch("src.services.state.STATE_DIR", tmp_path)):
         result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
     text = result[0].text
     assert "Applied" in text or "No changes" in text
+
+
+@pytest.mark.asyncio
+async def test_apply_campaigns_passes_stack_name_to_state_load(tmp_path):
+    with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="example")) as mock_load,
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        await _apply_campaigns({"json_path": EXAMPLE_PATH})
+    call_kwargs = mock_load.call_args
+    assert call_kwargs is not None
+    stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
+    assert stack_name_passed == "example"
 
 
 @pytest.mark.asyncio
@@ -154,7 +167,7 @@ async def test_apply_campaigns_executes_deletes_with_confirm(tmp_path):
 @pytest.mark.asyncio
 async def test_plan_campaigns_does_not_call_apply(tmp_path):
     meta = _make_meta_client()
-    state = StateFile(EXAMPLE_JSON["account_id"])
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
@@ -164,6 +177,21 @@ async def test_plan_campaigns_does_not_call_apply(tmp_path):
     meta.update_campaign.assert_not_called()
     meta.delete_campaign.assert_not_called()
     assert len(result[0].text) > 0
+
+
+@pytest.mark.asyncio
+async def test_plan_campaigns_passes_stack_name_to_state_load(tmp_path):
+    meta = _make_meta_client()
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+          patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
+          patch("src.services.state.STATE_DIR", tmp_path)):
+        await _plan_campaigns({"json_path": EXAMPLE_PATH})
+    call_kwargs = mock_load.call_args
+    assert call_kwargs is not None
+    stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
+    assert stack_name_passed == "example"
 
 
 @pytest.mark.asyncio
@@ -293,26 +321,28 @@ async def test_pause_campaigns_queries_facebook_not_state(tmp_path):
 # ------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_local_state_returns_state_data():
-    state = StateFile("act_123")
+async def test_get_local_state_returns_state_data(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     state.upsert_campaign("Summer Sale", "camp_001", {"name": "Summer Sale"})
+    json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _get_local_state({"account_id": "act_123"})
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
+        result = await _get_local_state({"json_path": json_path})
 
     assert "Summer Sale" in result[0].text
 
 
 @pytest.mark.asyncio
-async def test_get_local_state_filters_by_name():
-    state = StateFile("act_123")
+async def test_get_local_state_filters_by_name(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     state.upsert_campaign("Summer Sale", "camp_001", {})
     state.upsert_campaign("Winter Promo", "camp_002", {})
+    json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _get_local_state({"account_id": "act_123", "campaign_name": "summer"})
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
+        result = await _get_local_state({"json_path": json_path, "campaign_name": "summer"})
 
     text = result[0].text
     assert "Summer Sale" in text
@@ -320,13 +350,29 @@ async def test_get_local_state_filters_by_name():
 
 
 @pytest.mark.asyncio
+async def test_get_local_state_passes_stack_name(tmp_path):
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    json_path = str(CAMPAIGNS_DIR / "example.json")
+
+    with (patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
+        await _get_local_state({"json_path": json_path})
+
+    call_kwargs = mock_load.call_args
+    assert call_kwargs is not None
+    stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
+    assert stack_name_passed == "example"
+
+
+@pytest.mark.asyncio
 async def test_get_local_state_does_not_call_meta_api():
-    state = StateFile("act_123")
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     meta = _make_meta_client()
+    json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        await _get_local_state({})
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
+        await _get_local_state({"json_path": json_path})
     meta.list_campaigns.assert_not_called()
     meta.get_campaign.assert_not_called()
 
@@ -349,13 +395,28 @@ async def test_get_campaign_status_calls_meta_api():
 # ------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_drift_report_returns_report():
+async def test_get_drift_report_returns_report(tmp_path):
     meta = _make_meta_client()
-    state = StateFile("act_123")
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=state)):
-        result = await _get_drift_report({"account_id": "act_123"})
+        result = await _get_drift_report({"json_path": json_path})
     assert len(result[0].text) > 0
+
+
+@pytest.mark.asyncio
+async def test_get_drift_report_passes_stack_name(tmp_path):
+    meta = _make_meta_client()
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    json_path = str(CAMPAIGNS_DIR / "example.json")
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch("src.mcp_server.StateFile.load", return_value=state) as mock_load):
+        await _get_drift_report({"json_path": json_path})
+    call_kwargs = mock_load.call_args
+    assert call_kwargs is not None
+    stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
+    assert stack_name_passed == "example"
 
 
 # ------------------------------------------------------------------

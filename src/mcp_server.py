@@ -104,17 +104,19 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_local_state",
             description=(
-                "Read campaigns from the local state file (cache). "
+                "Read campaigns from this Ad Stack's state file (cache). "
                 "Never calls the Facebook API — returns what AdCode last recorded after a push. "
+                "Only shows campaigns tracked by this specific Ad Stack. "
                 "Use this to inspect tracked configuration or fb_ids. "
                 "Do NOT use this to answer questions about what currently exists on Facebook; "
                 "use list_campaigns for that."
             ),
             inputSchema={
                 "type": "object",
+                "required": ["json_path"],
                 "properties": {
+                    "json_path": {"type": "string", "description": "Path to the Ad Stack JSON file (e.g. customers/acme/campaigns/q2_brand.json)."},
                     "campaign_name": {"type": "string", "description": "Filter by campaign name (substring match)."},
-                    "account_id": {"type": "string", "description": "Limit to a specific ad account."},
                 },
             },
         ),
@@ -136,7 +138,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_drift_report",
             description=(
-                "Compare the local state file to live Facebook data and report any divergence. "
+                "Compare this Ad Stack's state to live Facebook data and report any divergence. "
+                "Only checks campaigns declared in this stack — never reports on campaigns from other stacks. "
                 "Detects: objects in state that no longer exist on Facebook (deleted externally), "
                 "objects on Facebook not tracked in state (created outside AdCode), "
                 "and field mismatches (edited manually in Ads Manager). "
@@ -144,18 +147,19 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
-                "required": ["account_id"],
+                "required": ["json_path"],
                 "properties": {
-                    "account_id": {"type": "string", "description": "Ad account ID (e.g. act_366643171197739)."},
+                    "json_path": {"type": "string", "description": "Path to the Ad Stack JSON file (e.g. customers/acme/campaigns/q2_brand.json)."},
                 },
             },
         ),
         Tool(
             name="plan_campaigns",
             description=(
-                "Validate a campaign JSON file and show the full changeset that apply_campaigns would execute — "
+                "Validate an Ad Stack file and show the full changeset that apply_campaigns would execute — "
                 "no changes are made to Facebook. "
                 "Returns schema and AI policy validation results plus a diff of creates, updates, and deletes. "
+                "Changes are scoped to this stack only — other stacks are unaffected. "
                 "Always run this before apply_campaigns."
             ),
             inputSchema={
@@ -327,7 +331,8 @@ async def _plan_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    stack_name = Path(args["json_path"]).stem if args.get("json_path") else None
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
     p = plan(campaign_json, state, meta)
 
     diff_section = _format_plan(p) if len(p) > 0 else "No changes — Facebook already matches this configuration."
@@ -345,7 +350,8 @@ async def _apply_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    stack_name = Path(args["json_path"]).stem if args.get("json_path") else None
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
     p = plan(campaign_json, state, meta)
 
     if len(p) == 0:
@@ -375,11 +381,13 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
     campaign_name = args.get("campaign_name")
     campaign_id_filter = args.get("campaign_id")
+    json_path = args.get("json_path")
 
     live_campaigns = meta.list_campaigns(account_id)
 
     paused = []
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    stack_name = Path(json_path).stem if json_path else None
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
 
     for c in live_campaigns:
         fb_id = c["id"]
@@ -402,9 +410,14 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
 
 
 async def _get_local_state(args: dict) -> list[TextContent]:
+    json_path = args.get("json_path")
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
     campaign_name_filter = args.get("campaign_name", "").lower()
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    stack_name = Path(json_path).stem if json_path else None
+    if not account_id and json_path:
+        campaign_json = load_campaign_json(json_path)
+        account_id = campaign_json["account_id"]
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
 
     campaigns = state.campaigns()
     if campaign_name_filter:
@@ -424,9 +437,18 @@ async def _get_campaign_status(args: dict) -> list[TextContent]:
 
 
 async def _get_drift_report(args: dict) -> list[TextContent]:
-    account_id = args["account_id"]
+    json_path = args.get("json_path")
+    account_id = args.get("account_id", "")
+    stack_name = None
+    if json_path:
+        stack_name = Path(json_path).stem
+        if not account_id:
+            campaign_json = load_campaign_json(json_path)
+            account_id = campaign_json["account_id"]
+    elif not account_id:
+        account_id = os.environ.get("FB_ACCOUNT_ID", "")
     meta = _get_meta_client()
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
     return [TextContent(type="text", text=format_report(report))]
@@ -470,9 +492,10 @@ async def _import_adsets(args: dict) -> list[TextContent]:
     account_id = args["account_id"]
     json_path = args["json_path"]
     name_filter = set(args["adset_names"]) if args.get("adset_names") else None
+    stack_name = Path(json_path).stem
 
     meta = _get_meta_client()
-    state = StateFile.load(account_id, state_dir=_state_dir)
+    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
 

@@ -293,3 +293,36 @@ class TestApplyDeletes:
             p = plan(example_campaign, state_with_extra_campaign, mock_client)
             result = apply(p, mock_client, state_with_extra_campaign)
         assert len(result.failed) > 0
+
+
+# ------------------------------------------------------------------
+# plan() — Ad Stack isolation (ADR-012)
+# ------------------------------------------------------------------
+
+class TestPlanStackIsolation:
+    def test_plan_only_deletes_from_its_own_state(self, example_campaign, mock_client):
+        """plan() must not emit delete ops for campaigns that belong to a different stack."""
+        # Stack A: has "Other Stack Campaign" — simulates a state file owned by a different stack
+        stack_a_state = StateFile("act_000000000", stack_name="other_stack")
+        stack_a_state.upsert_campaign(
+            "Other Stack Campaign", "other_camp_001",
+            {"name": "Other Stack Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []}
+        )
+
+        # Stack B: has only the campaigns that match example_campaign
+        stack_b_state = StateFile("act_000000000", stack_name="example")
+        campaign = example_campaign["campaigns"][0]
+        adset = campaign["ad_sets"][0]
+        ad = adset["ads"][0]
+        stack_b_state.upsert_campaign(campaign["name"], "camp_fb_001", {"name": campaign["name"], "objective": campaign["objective"], "status": campaign["status"], "special_ad_categories": []})
+        stack_b_state.upsert_adset(campaign["name"], adset["name"], "adset_fb_001", {"name": adset["name"], "status": adset["status"], "billing_event": adset["billing_event"], "optimization_goal": adset["optimization_goal"], "daily_budget": adset["daily_budget"]})
+        stack_b_state.upsert_ad(campaign["name"], adset["name"], ad["name"], "ad_fb_001", "creative_fb_001", {"name": ad["name"], "status": ad["status"]})
+
+        # plan() against Stack B's state: example_campaign matches exactly — no deletes expected
+        p = plan(example_campaign, stack_b_state, mock_client)
+        delete_ops = [op for op in p.operations if isinstance(op, (DeleteCampaign, DeleteAdSet, DeleteAd))]
+        deleted_names = [getattr(op, "campaign_name", None) for op in delete_ops]
+
+        # "Other Stack Campaign" must never appear in Stack B's delete ops
+        assert "Other Stack Campaign" not in deleted_names
+        assert len(delete_ops) == 0

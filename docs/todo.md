@@ -396,3 +396,32 @@ RESEND_API_KEY=...
 ANTHROPIC_API_KEY=...
 WEBHOOK_SECRET=...
 ```
+
+---
+
+## Phase 19 — Ad Stack Model (ADR-012)
+
+Shift state files from account-scoped to stack-scoped. Each Ad Stack (`campaigns/<name>.json`) now has its own isolated state file (`state/<name>.json`). Applying one stack can never delete or drift-detect campaigns belonging to another stack. See ADR-012 for full rationale.
+
+### Documentation
+
+- [x] **Write ADR-012** — `docs/decisions/012-ad-stack-model.md`; documents the Ad Stack concept, stack isolation, file naming convention
+- [x] **Update README** — "How it works" table, directory layout, tool table descriptions for `get_drift_report` and `get_local_state`
+- [x] **Update `docs/demo/demo.md`** — new file paths (`campaigns/demo_v1.json`), Ad Stack terminology, updated Test 6/7/8 prompts
+
+### Tests
+
+- [x] **`tests/test_state.py`** — add 3 tests: `load` uses `stack_name` for path, `save` uses `stack_name`, two stacks same account are independent
+- [x] **`tests/test_traffic.py`** — add test: `plan()` only emits deletes for campaigns in its own state, not campaigns from other stacks
+- [x] **`tests/test_mcp_server.py`** — update existing tests to assert `stack_name` passed to `StateFile.load`; update `get_drift_report` and `get_local_state` tests to pass `json_path`
+
+### Code
+
+- [x] **`src/services/state.py`** — add `stack_name` param to `StateFile.__init__`, `.load()`, `.save()`; file path uses `stack_name` stem, not `account_id`
+- [x] **`src/mcp_server.py`** — derive `stack_name = Path(json_path).stem` in all handlers; pass to `StateFile.load`; change `get_drift_report` and `get_local_state` input schemas from `account_id` to `json_path`
+
+### Demo restructure
+
+- [x] **Move** `customers/demo/campaigns/act_366643171197739/demo_v1.json` → `customers/demo/campaigns/demo_v1.json`
+- [x] **Delete** `customers/demo/campaigns/act_366643171197739/` directory
+- [x] **Rename** `customers/demo/state/act_366643171197739.json` → `customers/demo/state/demo_v1.json`
