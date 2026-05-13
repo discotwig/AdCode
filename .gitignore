@@ -1,6 +1,8 @@
 # Environment
 .env
-customers/*/.env
+
+# Customer workspaces contain local stack templates, state, and credentials.
+customers/
 
 # State lock files (state JSON files are committed; lock files are not)
 state/*.lock
