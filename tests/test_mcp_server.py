@@ -8,6 +8,7 @@ from src.mcp_server import (
     _get_local_state, _get_campaign_status, _get_drift_report,
     _list_campaigns, _ingest_excel, _import_adsets, _find_duplicates,
     _get_campaign_export, list_tools, _check_facebook_connection, main,
+    _load_stack_config,
 )
 from src.services.state import StateFile
 
@@ -44,6 +45,8 @@ EXAMPLE_PATH = str(CAMPAIGNS_DIR / "example.json")
 with open(EXAMPLE_PATH, encoding="utf-8") as _f:
     EXAMPLE_JSON = json.load(_f)
 
+_EXAMPLE_PATH_OBJ = Path(EXAMPLE_PATH).resolve()
+
 
 # ------------------------------------------------------------------
 # list_tools
@@ -75,6 +78,75 @@ async def test_list_tools_no_retired_tools():
     assert "teardown_campaigns" not in names
 
 
+@pytest.mark.asyncio
+async def test_list_tools_stack_scoped_tools_have_no_json_path():
+    """Tools that use stack globals must not expose json_path in their schema."""
+    tools = await list_tools()
+    stack_scoped = {"plan_campaigns", "apply_campaigns", "get_drift_report",
+                    "get_local_state", "import_adsets"}
+    for tool in tools:
+        if tool.name in stack_scoped:
+            props = tool.inputSchema.get("properties", {})
+            assert "json_path" not in props, (
+                f"{tool.name} should not expose json_path — use server globals instead"
+            )
+
+
+# ------------------------------------------------------------------
+# _load_stack_config
+# ------------------------------------------------------------------
+
+def test_load_stack_config_sets_globals(tmp_path):
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_999", "campaigns": []}))
+
+    import src.mcp_server as mod
+    with patch.dict("os.environ", {}, clear=False):
+        _load_stack_config(str(template))
+
+    assert mod._STACK_JSON_PATH == template.resolve()
+    assert mod._STACK_STATE_DIR == stack_dir.resolve()
+    assert mod._ACCOUNT_ID == "act_999"
+    assert "os" not in str(mod._STACK_JSON_PATH)  # sanity: it's a Path
+
+
+def test_load_stack_config_sets_fb_account_id_env(tmp_path):
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_777", "campaigns": []}))
+
+    with patch.dict("os.environ", {}):
+        _load_stack_config(str(template))
+        import os
+        assert os.environ["FB_ACCOUNT_ID"] == "act_777"
+
+
+def test_load_stack_config_loads_stack_env(tmp_path):
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_888", "campaigns": []}))
+    env_file = stack_dir / ".env"
+    env_file.write_text("FB_APP_ID=test_app_id_from_env\n")
+
+    with patch.dict("os.environ", {}, clear=False):
+        _load_stack_config(str(template))
+        import os
+        assert os.environ.get("FB_APP_ID") == "test_app_id_from_env"
+
+
+def test_load_stack_config_no_error_when_env_absent(tmp_path):
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_555", "campaigns": []}))
+    # No .env file — should not raise
+    _load_stack_config(str(template))
+
+
 # ------------------------------------------------------------------
 # apply_campaigns
 # ------------------------------------------------------------------
@@ -84,8 +156,11 @@ async def test_apply_campaigns_applies_when_valid(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="example")),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({})
     text = result[0].text
     assert "Applied" in text or "No changes" in text
 
@@ -95,8 +170,11 @@ async def test_apply_campaigns_passes_stack_name_to_state_load(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")) as mock_load,
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        await _apply_campaigns({"json_path": EXAMPLE_PATH})
+        await _apply_campaigns({})
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
@@ -109,8 +187,11 @@ async def test_apply_campaigns_blocked_when_policy_error(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client(policy_warnings)),
           patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({})
     assert "blocked" in result[0].text.lower()
 
 
@@ -127,8 +208,11 @@ async def test_apply_campaigns_no_changes_message(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({})
     assert "No changes" in result[0].text
 
 
@@ -139,8 +223,11 @@ async def test_apply_campaigns_returns_plan_when_deletes_without_confirm(tmp_pat
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _apply_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _apply_campaigns({})
     text = result[0].text
     assert "confirm_deletes" in text
     assert "DELETE" in text.upper()
@@ -154,8 +241,11 @@ async def test_apply_campaigns_executes_deletes_with_confirm(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _apply_campaigns({"json_path": EXAMPLE_PATH, "confirm_deletes": True})
+        result = await _apply_campaigns({"confirm_deletes": True})
     assert "Applied" in result[0].text
     meta.delete_campaign.assert_called_with("stale_001")
 
@@ -171,8 +261,11 @@ async def test_plan_campaigns_does_not_call_apply(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _plan_campaigns({})
     meta.create_campaign.assert_not_called()
     meta.update_campaign.assert_not_called()
     meta.delete_campaign.assert_not_called()
@@ -186,8 +279,11 @@ async def test_plan_campaigns_passes_stack_name_to_state_load(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        await _plan_campaigns({"json_path": EXAMPLE_PATH})
+        await _plan_campaigns({})
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
@@ -201,10 +297,12 @@ async def test_plan_campaigns_includes_validation_and_diff(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _plan_campaigns({})
     text = result[0].text
-    # Should contain both validation summary and diff
     assert "Pushable" in text or "blocked" in text.lower()
     assert "CreateCampaign" in text or "No changes" in text
 
@@ -222,8 +320,11 @@ async def test_plan_campaigns_no_changes_message(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_JSON_PATH", _EXAMPLE_PATH_OBJ),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"]),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _plan_campaigns({"json_path": EXAMPLE_PATH})
+        result = await _plan_campaigns({})
     assert "No changes" in result[0].text
 
 
@@ -266,9 +367,11 @@ async def test_pause_campaigns_pauses_matching(tmp_path):
     ]
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _pause_campaigns({"campaign_name": "Summer Sale", "account_id": "act_123"})
+        result = await _pause_campaigns({"campaign_name": "Summer Sale"})
 
     meta.pause_campaign.assert_called_once_with("camp_001")
     assert "Summer Sale" in result[0].text
@@ -282,9 +385,11 @@ async def test_pause_campaigns_skips_already_paused(tmp_path):
     ]
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _pause_campaigns({"campaign_name": "Summer Sale", "account_id": "act_123"})
+        result = await _pause_campaigns({"campaign_name": "Summer Sale"})
 
     meta.pause_campaign.assert_not_called()
     assert "already paused" in result[0].text
@@ -298,9 +403,11 @@ async def test_pause_campaigns_no_match_message(tmp_path):
     ]
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        result = await _pause_campaigns({"campaign_name": "Nonexistent", "account_id": "act_123"})
+        result = await _pause_campaigns({"campaign_name": "Nonexistent"})
     assert "No matching" in result[0].text
 
 
@@ -310,9 +417,11 @@ async def test_pause_campaigns_queries_facebook_not_state(tmp_path):
     meta.list_campaigns.return_value = []
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=StateFile("act_123")),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path),
           patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
-        await _pause_campaigns({"account_id": "act_123"})
+        await _pause_campaigns({})
     meta.list_campaigns.assert_called_once()
 
 
@@ -324,11 +433,11 @@ async def test_pause_campaigns_queries_facebook_not_state(tmp_path):
 async def test_get_local_state_returns_state_data(tmp_path):
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     state.upsert_campaign("Summer Sale", "camp_001", {"name": "Summer Sale"})
-    json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
-        result = await _get_local_state({"json_path": json_path})
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        result = await _get_local_state({})
 
     assert "Summer Sale" in result[0].text
 
@@ -338,11 +447,11 @@ async def test_get_local_state_filters_by_name(tmp_path):
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     state.upsert_campaign("Summer Sale", "camp_001", {})
     state.upsert_campaign("Winter Promo", "camp_002", {})
-    json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
-        result = await _get_local_state({"json_path": json_path, "campaign_name": "summer"})
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        result = await _get_local_state({"campaign_name": "summer"})
 
     text = result[0].text
     assert "Summer Sale" in text
@@ -352,11 +461,11 @@ async def test_get_local_state_filters_by_name(tmp_path):
 @pytest.mark.asyncio
 async def test_get_local_state_passes_stack_name(tmp_path):
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="state")
-    json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
-        await _get_local_state({"json_path": json_path})
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        await _get_local_state({})
 
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
@@ -368,11 +477,11 @@ async def test_get_local_state_passes_stack_name(tmp_path):
 async def test_get_local_state_does_not_call_meta_api():
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
     meta = _make_meta_client()
-    json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch.dict("os.environ", {"FB_ACCOUNT_ID": EXAMPLE_JSON["account_id"]})):
-        await _get_local_state({"json_path": json_path})
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        await _get_local_state({})
     meta.list_campaigns.assert_not_called()
     meta.get_campaign.assert_not_called()
 
@@ -398,10 +507,11 @@ async def test_get_campaign_status_calls_meta_api():
 async def test_get_drift_report_returns_report(tmp_path):
     meta = _make_meta_client()
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
-    json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server.StateFile.load", return_value=state)):
-        result = await _get_drift_report({"json_path": json_path})
+          patch("src.mcp_server.StateFile.load", return_value=state),
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        result = await _get_drift_report({})
     assert len(result[0].text) > 0
 
 
@@ -409,10 +519,11 @@ async def test_get_drift_report_returns_report(tmp_path):
 async def test_get_drift_report_passes_stack_name(tmp_path):
     meta = _make_meta_client()
     state = StateFile(EXAMPLE_JSON["account_id"], stack_name="state")
-    json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
-          patch("src.mcp_server.StateFile.load", return_value=state) as mock_load):
-        await _get_drift_report({"json_path": json_path})
+          patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
+          patch("src.mcp_server._STACK_STATE_DIR", _EXAMPLE_PATH_OBJ.parent),
+          patch("src.mcp_server._ACCOUNT_ID", EXAMPLE_JSON["account_id"])):
+        await _get_drift_report({})
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
@@ -462,9 +573,9 @@ def _make_campaign_json(tmp_path, with_adset=False):
             }
         ],
     }
-    path = tmp_path / "test.json"
+    path = tmp_path / "test_template.json"
     path.write_text(json.dumps(data))
-    return str(path)
+    return path
 
 
 @pytest.mark.asyncio
@@ -477,14 +588,17 @@ async def test_import_adsets_imports_missing_adset(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.mcp_server._STACK_JSON_PATH", json_path.resolve()),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _import_adsets({"account_id": "act_123", "json_path": json_path})
+        result = await _import_adsets({})
 
     text = result[0].text
     assert "Imported 1" in text
     assert "Untracked Ad Set" in text
 
-    updated = json.loads(Path(json_path).read_text())
+    updated = json.loads(json_path.read_text())
     adset_names = [a["name"] for a in updated["campaigns"][0]["ad_sets"]]
     assert "Untracked Ad Set" in adset_names
     assert updated["campaigns"][0]["ad_sets"][0]["bid_strategy"] == "LOWEST_COST_WITHOUT_CAP"
@@ -512,16 +626,15 @@ async def test_import_adsets_filters_by_name(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.mcp_server._STACK_JSON_PATH", json_path.resolve()),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _import_adsets({
-            "account_id": "act_123",
-            "json_path": json_path,
-            "adset_names": ["Ad Set A"],
-        })
+        result = await _import_adsets({"adset_names": ["Ad Set A"]})
 
     text = result[0].text
     assert "Imported 1" in text
-    updated = json.loads(Path(json_path).read_text())
+    updated = json.loads(json_path.read_text())
     adset_names = [a["name"] for a in updated["campaigns"][0]["ad_sets"]]
     assert "Ad Set A" in adset_names
     assert "Ad Set B" not in adset_names
@@ -539,8 +652,11 @@ async def test_import_adsets_skips_already_tracked(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server.StateFile.load", return_value=state),
           patch("src.mcp_server.fetch_actuals", return_value=actuals),
+          patch("src.mcp_server._STACK_JSON_PATH", json_path.resolve()),
+          patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
+          patch("src.mcp_server._ACCOUNT_ID", "act_123"),
           patch("src.services.state.STATE_DIR", tmp_path)):
-        result = await _import_adsets({"account_id": "act_123", "json_path": json_path})
+        result = await _import_adsets({})
 
     assert "nothing to import" in result[0].text.lower()
 
@@ -551,10 +667,6 @@ async def test_list_tools_includes_import_adsets():
     names = {t.name for t in tools}
     assert "import_adsets" in names
 
-
-# ------------------------------------------------------------------
-# find_duplicates
-# ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
 # get_campaign_export
@@ -599,6 +711,10 @@ async def test_get_campaign_export_calls_fetch_actuals():
     mock_fetch.assert_called_once_with("act_123", meta)
 
 
+# ------------------------------------------------------------------
+# find_duplicates
+# ------------------------------------------------------------------
+
 @pytest.mark.asyncio
 async def test_find_duplicates_returns_duplicates():
     meta = _make_meta_client()
@@ -635,7 +751,7 @@ async def test_find_duplicates_no_duplicates():
 
 
 # ------------------------------------------------------------------
-# _check_facebook_connection / --config startup gate
+# _check_facebook_connection / startup
 # ------------------------------------------------------------------
 
 def test_check_facebook_connection_returns_true_on_success():
@@ -657,9 +773,11 @@ def test_check_facebook_connection_returns_false_on_failure():
 
 
 def test_main_exits_when_config_connection_fails(tmp_path):
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps({"customer_slug": "test", "account_id": "act_123"}))
-    with (patch("sys.argv", ["mcp_server", "--config", str(config_path)]),
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_123", "campaigns": []}))
+    with (patch("sys.argv", ["mcp_server", "--config", str(template)]),
           patch("src.mcp_server._check_facebook_connection", return_value=False)):
         with pytest.raises(SystemExit) as exc_info:
             main()
@@ -667,10 +785,12 @@ def test_main_exits_when_config_connection_fails(tmp_path):
 
 
 def test_main_skips_check_with_flag(tmp_path):
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps({"customer_slug": "test", "account_id": "act_123"}))
+    stack_dir = tmp_path / "my_stack"
+    stack_dir.mkdir()
+    template = stack_dir / "my_stack_template.json"
+    template.write_text(json.dumps({"account_id": "act_123", "campaigns": []}))
     mock_check = MagicMock()
-    with (patch("sys.argv", ["mcp_server", "--config", str(config_path), "--skip-connection-check"]),
+    with (patch("sys.argv", ["mcp_server", "--config", str(template), "--skip-connection-check"]),
           patch("src.mcp_server._check_facebook_connection", mock_check),
           patch("asyncio.run")):
         main()

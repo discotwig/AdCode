@@ -41,7 +41,7 @@ Path 3 — Dirty Excel or plain text:
 
 The bot is **sender-agnostic** — any email that arrives with a valid webhook secret is processed, regardless of sender address. No per-client allowlist is maintained. The `WEBHOOK_SECRET` shared with the Cloudflare Worker is the only security boundary.
 
-Bot settings are global environment variables on Fly.io (`OPERATOR_EMAIL`, `BOT_EMAIL`, `RESEND_API_KEY`, `ANTHROPIC_API_KEY`, `WEBHOOK_SECRET`). Customer configs (`customers/*/config.json`) are for the local MCP server only and contain no email routing fields.
+Bot settings are global environment variables on Fly.io (`OPERATOR_EMAIL`, `BOT_EMAIL`, `RESEND_API_KEY`, `ANTHROPIC_API_KEY`, `WEBHOOK_SECRET`). Stack `.env` files (`customers/*/stack_name/.env`) are for the local MCP server only and contain no email routing fields.
 
 See ADR-010 for the mailroom design rationale. See ADR-011 for the sender-agnostic decision.
 
@@ -51,17 +51,16 @@ After receiving a forwarded template, the operator applies it locally:
 
 ```bash
 # 1. Save the template into the customer's stack folder
-#    (copy attachment from email to customers/<slug>/<stack-name>/<stack-name>.json)
+#    (copy attachment from email to customers/<slug>/<stack-name>/<stack-name>_template.json)
 
-# 2. Start the MCP server scoped to that customer
-python src/mcp_server.py --config customers/<slug>/config.json
+# 2. Start the MCP server scoped to that stack
+python src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json
 
 # 3. Use your AI client (Claude, Gemini, Cursor) to plan and apply:
-#    "Plan customers/acme/q1_brand/q1_brand.json"
-#    "Apply it"
+#    "Plan and apply this stack"
 ```
 
-State is written to `customers/<slug>/<stack-name>/state.json` after each apply and committed to Git alongside the template. The Git history is the audit trail.
+`--config` loads `.env` from the stack directory and sets `account_id` from the template. State is written to `customers/<slug>/<stack-name>/state.json` after each apply and committed to Git alongside the template. The Git history is the audit trail.
 
 ## How it works
 
@@ -70,12 +69,13 @@ AdCode follows the same model as Terraform:
 | Concept | AdCode equivalent |
 | --- | --- |
 | Stack directory | `<stack-name>/` — the folder *is* the unit of isolation, exactly like `cd my-stack/` in Terraform |
-| Template | `<stack-name>/<stack-name>.json` — desired state; you edit this |
+| Template | `<stack-name>/<stack-name>_template.json` — desired state; you edit this |
+| Credentials | `<stack-name>/.env` — credentials for this stack's ad account (gitignored) |
 | Stack state | `<stack-name>/state.json` — maps every managed object to its Facebook ID (like `terraform.tfstate`) |
 | Changeset | `plan_campaigns` output — validates + shows creates, updates, and deletes |
 | Apply | `apply_campaigns` — makes Facebook match the template, then writes `state.json` |
 
-Each stack folder is self-contained: `q2_brand/q2_brand.json` and `q2_brand/state.json` live together. State location is always `Path(json_path).parent / "state.json"` — no server-side config is needed to find it. Two stacks in the same Facebook account are completely independent. See ADR-012 and ADR-013 for the full design.
+Each stack folder is fully self-contained: template, credentials, and state all live together. The server is started once per stack with `--config <stack>_template.json` — `account_id` and `.env` are read from that directory. Two stacks in the same Facebook account are completely independent. See ADR-012, ADR-013, and ADR-014 for the full design.
 
 **The full lifecycle in four steps:**
 
@@ -98,31 +98,33 @@ pip install -r requirements.txt
 
 ### 2. Create a customer directory
 
-Each client gets their own isolated directory with credentials, campaigns, and state. Use the onboarding script to scaffold it:
+Each client gets their own isolated stack directory. Use the onboarding script to scaffold it:
 
 ```bash
 python scripts/new_customer.py <slug> <account_id>
 # e.g. python scripts/new_customer.py acme-marketing act_123456789
 ```
 
-This creates `customers/<slug>/` with a `config.json` and `.env.example`. To add a stack, create a folder: `mkdir customers/<slug>/<stack-name>` and place the template inside it.
+This creates `customers/<slug>/<slug>_v1/` containing a `.env.example` and a blank `<slug>_v1_template.json`.
 
 ### 3. Configure credentials
 
 ```bash
-cp customers/<slug>/.env.example customers/<slug>/.env
+cp customers/<slug>/<stack-name>/.env.example customers/<slug>/<stack-name>/.env
 # Fill in FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, ANTHROPIC_API_KEY
 ```
 
-Facebook credentials: create a System User in Meta Business Manager, grant it access to the ad account, and generate a token with `ads_management` permission. The `account_id` is already set in `config.json` — no `FB_ACCOUNT_ID` needed in `.env`.
+Facebook credentials: create a System User in Meta Business Manager, grant it access to the ad account, and generate a token with `ads_management` permission. `account_id` is set in the template JSON — no `FB_ACCOUNT_ID` entry needed in `.env`.
+
+Each stack has its own `.env`. This is intentional — it makes it structurally impossible to apply the wrong account's credentials to the wrong stack.
 
 ### 4. Start the MCP server
 
 ```bash
-python src/mcp_server.py --config customers/<slug>/config.json
+python src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json
 ```
 
-The `--config` flag loads the customer's `.env` file and sets `FB_ACCOUNT_ID`. State and template paths are derived from the `json_path` each tool receives — no directory config is needed.
+`--config` points directly at the stack template. The server loads `.env` from the same directory, reads `account_id` from the template JSON, and is now scoped to that one stack for the lifetime of the process.
 
 Point your MCP-compatible model at the server. The tool surface is described below.
 
@@ -130,16 +132,16 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 
 | Tool | Description |
 | --- | --- |
-| `plan_campaigns(json_path)` | Validate an Ad Stack file and show the full changeset (creates, updates, deletes) — no changes made to Facebook. Always run before `apply_campaigns` |
-| `apply_campaigns(json_path, confirm_deletes?)` | Apply an Ad Stack to Facebook — creates, updates, and deletes scoped to this stack only. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
+| `plan_campaigns` | Validate the active stack template and show the full changeset (creates, updates, deletes) — no changes made to Facebook. Always run before `apply_campaigns` |
+| `apply_campaigns(confirm_deletes?)` | Apply the active stack to Facebook — creates, updates, and deletes scoped to this stack only. If the plan includes deletions, returns the plan first and requires `confirm_deletes=true` |
 | `list_campaigns(account_id?)` | Fetch all campaigns directly from Facebook — always live, never from the local state file |
-| `pause_campaigns(filter, json_path?)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly. Pass `json_path` to update the stack state file after pausing |
+| `pause_campaigns(filter?)` | Pause campaigns on Facebook matching a name or ID filter — queries Facebook directly |
 | `get_campaign_status(campaign_id)` | Fetch live fields for a single campaign from Facebook by ID |
 | `get_campaign_export(account_id)` | Fetch the full campaign hierarchy (campaigns + ad sets + ads) for an account in one call — always live |
-| `get_drift_report(json_path)` | Compare this Ad Stack's state to live Facebook data; only reports on campaigns declared in this stack |
-| `import_adsets(json_path, account_id, name_filter?)` | Adopt ad sets that exist on Facebook but are not tracked in this stack (MISSING_FROM_STATE items) — the equivalent of `terraform import` for ad sets |
-| `find_duplicates(account_id)` | Find campaigns with duplicate names in the account; returns each name with multiple fb_ids along with created_time and status |
-| `get_local_state(json_path)` | Read this Ad Stack's state file — shows what AdCode last recorded after a push, scoped to this stack only |
+| `get_drift_report` | Compare this Ad Stack's state to live Facebook data; only reports on campaigns declared in this stack |
+| `import_adsets(adset_names?)` | Adopt ad sets that exist on Facebook but are not tracked in this stack (MISSING_FROM_STATE items) — the equivalent of `terraform import` for ad sets |
+| `find_duplicates(account_id?)` | Find campaigns with duplicate names in the account; returns each name with multiple fb_ids along with created_time and status |
+| `get_local_state(campaign_name?)` | Read this Ad Stack's state file — shows what AdCode last recorded after a push, scoped to this stack only |
 | `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI; flags ambiguities for human review |
 
 ## Repository layout
@@ -147,11 +149,11 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 ```text
 customers/
   <slug>/
-    config.json         Account ID + slug (committed)
-    .env                Facebook + Anthropic credentials (gitignored)
-    <stack-name>/       One folder per Ad Stack — the folder IS the stack
-      <stack-name>.json Template (desired state) — edit this
-      state.json        Stack state written after apply (like terraform.tfstate)
+    <stack-name>/                      One folder per Ad Stack — the folder IS the stack
+      <stack-name>_template.json       Template (desired state) — edit this
+      .env                             Credentials for this stack's ad account (gitignored)
+      .env.example                     Credential template (committed)
+      state.json                       Stack state written after apply (like terraform.tfstate)
 src/
   api/meta.py           Facebook Marketing API client
   services/
@@ -187,25 +189,24 @@ Each client gets their own server process, working directory, and credentials. M
 ```text
 customers/
   acme/
-    config.json        ← account_id + slug (committed)
-    .env               ← FB + Anthropic credentials (gitignored)
-    q1_brand/          ← Ad Stack folder
-      q1_brand.json    ← template
-      state.json       ← stack state (written after apply)
-    q2_retail/         ← independent Ad Stack folder
-      q2_retail.json
+    q1_brand/                      ← Ad Stack folder
+      q1_brand_template.json       ← template
+      .env                         ← credentials for Acme's ad account (gitignored)
+      state.json                   ← stack state (written after apply)
+    q2_retail/                     ← independent Ad Stack folder
+      q2_retail_template.json
+      .env
       state.json
   globex/
-    config.json
-    .env
     summer_launch/
-      summer_launch.json
+      summer_launch_template.json
+      .env
       state.json
 ```
 
-A server instance started with `--config customers/acme/config.json` can only reach Acme's account and credentials. Each stack folder is isolated — applying `q1_brand/q1_brand.json` cannot affect campaigns tracked by `q2_retail/`.
+A server started with `--config customers/acme/q1_brand/q1_brand_template.json` loads only Acme's credentials and can only act on that stack. Each stack's `.env` pins it to a specific ad account — it is physically impossible to apply the wrong credentials to the wrong stack.
 
-Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the service model, ADR-012 for Ad Stack isolation, and ADR-013 for the Terraform-style layout.
+Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the service model, ADR-012 for Ad Stack isolation, ADR-013 for the Terraform-style layout, and ADR-014 for the stack-level credential model.
 
 ## Connecting Gemini (or any MCP-compatible model)
 
