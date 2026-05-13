@@ -1,0 +1,57 @@
+{
+  "account_id": "act_000000000",
+  "campaigns": [
+    {
+      "name": "Summer Sale Traffic",
+      "objective": "OUTCOME_TRAFFIC",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "ad_sets": [
+        {
+          "name": "US 25-54 Broad",
+          "status": "PAUSED",
+          "daily_budget": 5000,
+          "billing_event": "IMPRESSIONS",
+          "optimization_goal": "LINK_CLICKS",
+          "targeting": {
+            "geo_locations": {
+              "countries": [
+                "US"
+              ]
+            },
+            "age_min": 25,
+            "age_max": 54,
+            "publisher_platforms": [
+              "facebook",
+              "instagram"
+            ]
+          },
+          "ads": [
+            {
+              "name": "Static Image v1",
+              "status": "PAUSED",
+              "creative": {
+                "name": "Summer Sale Creative v1",
+                "object_story_spec": {
+                  "page_id": "REPLACE_WITH_PAGE_ID",
+                  "link_data": {
+                    "message": "Shop our summer sale with up to 40% off sitewide.",
+                    "link": "https://example.com/summer-sale",
+                    "name": "Summer Sale",
+                    "description": "Limited time offer. Shop now.",
+                    "call_to_action": {
+                      "type": "SHOP_NOW",
+                      "value": {
+                        "link": "https://example.com/summer-sale"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

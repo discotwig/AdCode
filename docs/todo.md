@@ -1,5 +1,7 @@
 # AdCode — Build Checklist
 
+> Historical build log. This file records implementation phases as they happened, including older layouts that have since been superseded. For the current architecture and stack layout, see `README.md` and `docs/architecture.md`.
+
 Work is ordered chronologically. Each phase depends on the one before it. Check off items as they are completed.
 
 ---
