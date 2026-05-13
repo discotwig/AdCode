@@ -347,43 +347,52 @@ Decouple the email bot from the engine. The bot validates and routes submissions
 
 ### Email bot refactor (`src/email_bot.py`)
 
-- [ ] **Remove engine imports** — remove `MetaClient`, `StateFile`, `plan`, `apply as apply_plan`, `validate_all` imports
-- [ ] **Remove pending file system** — delete `_scan_expired_pending()`, lifespan context manager, `.pending_*` file read/write, `PENDING_EXPIRY_HOURS`
-- [ ] **Remove GO/HOLD flow** — delete `_handle_operator_reply()`, operator reply routing, `_format_plan_text()`
-- [ ] **Remove clarification loop** — delete `_handle_clarification()`, `_APPLY_CLARIFICATIONS` prompt, `.clarifying_*` file logic
-- [ ] **Implement three-path routing** in `_handle_inbound()`:
+- [x] **Remove engine imports** — remove `MetaClient`, `StateFile`, `plan`, `apply as apply_plan`, `validate_all` imports
+- [x] **Remove pending file system** — delete `_scan_expired_pending()`, lifespan context manager, `.pending_*` file read/write, `PENDING_EXPIRY_HOURS`
+- [x] **Remove GO/HOLD flow** — delete `_handle_operator_reply()`, operator reply routing, `_format_plan_text()`
+- [x] **Remove clarification loop** — delete `_handle_clarification()`, `_APPLY_CLARIFICATIONS` prompt, `.clarifying_*` file logic
+- [x] **Implement three-path routing** in `_handle_inbound()`:
   - Path 1 (valid JSON template): reply client ack + forward template to operator as attachment
   - Path 2 (JSON fails schema): reply client with specific `jsonschema` errors and fix instructions; do not forward
   - Path 3 (xlsx or plain text): seed template via `ingest_excel` / `extract_from_text`; reply client with `.json` attachment and review instructions
-- [ ] **Remove `_APPLY_CLARIFICATIONS` and related prompts** from `src/prompts.py` if present
+- [x] **Remove `_APPLY_CLARIFICATIONS` and related prompts** — clarification loop removed entirely
 
 ### Infrastructure
 
-- [ ] **Create `requirements-email.txt`** — copy of `requirements.txt` without `facebook-business` SDK; used by Fly.io image
-- [ ] **Update `Dockerfile`** — use `requirements-email.txt` instead of `requirements.txt`
-- [ ] **Update `entrypoint.sh`** if needed to reflect removed pending scan
+- [x] **Create `requirements-email.txt`** — copy of `requirements.txt` without `facebook-business` SDK; used by Fly.io image
+- [x] **Update `Dockerfile`** — use `requirements-email.txt` instead of `requirements.txt`
+- [x] **Update `entrypoint.sh`** if needed to reflect removed pending scan
 
 ### MCP server
 
-- [ ] **Add startup connection check** to `src/mcp_server.py` when `--config` is used — call `client.list_campaigns(account_id)` with a single result; log success or exit with clear error on failure
-- [ ] **Add `--skip-connection-check` flag** for offline/test use
+- [x] **Add startup connection check** to `src/mcp_server.py` when `--config` is used — call `client.list_campaigns(account_id)` with a single result; log success or exit with clear error on failure
+- [x] **Add `--skip-connection-check` flag** for offline/test use
 
 ### Tests
 
-- [ ] **Rewrite `tests/test_email_bot.py`** — cover three-path routing: valid template (operator forward + client ack), invalid template (errors returned), dirty Excel (seeded template returned), unknown sender (rejected)
-- [ ] **Delete `tests/test_pending_expiry.py`** — pending file mechanism removed
+- [x] **Rewrite `tests/test_email_bot.py`** — covers three-path routing: valid template (operator forward + client ack), invalid template (errors returned), dirty Excel (seeded template returned); 27 tests passing
+- [x] **Delete `tests/test_pending_expiry.py`** — pending file mechanism removed
 - [ ] **Add `--config` connection check test** to `tests/test_mcp_server.py`
 
-### Active bug — clarification reply loop
+---
 
-**Symptom:** Client replies with answers (e.g. "A-a, B-b") but receives another round of the same clarification questions instead of a plan email.
+## Phase 18 — Agnostic Email Bot (ADR-011)
 
-**Root cause:** On a reply, the bot re-runs `extract_from_text()` on the thread body. Claude re-extracts campaigns from scratch, re-discovers the same missing fields, and generates the same questions again. The thread context is not sufficient to resolve structured fields like image hashes, page IDs, and bid strategy.
+Remove per-sender authentication and per-customer config lookup from the email bot. The bot accepts all inbound email, uses global env vars for its settings, and seeds templates with an `account_id` placeholder the client must fill in manually.
 
-**Fix implemented (not yet confirmed working):** Stateful clarification files (`.clarifying_{id}.json`) save the extracted draft campaigns when ambiguities are found. The reply subject contains `[Clarify-{id}]`; matching replies route to `_handle_clarification()` which applies answers to the saved draft via `_APPLY_CLARIFICATIONS` prompt instead of re-extracting. Commit `46aca6f`.
+- [x] **Refactor `src/email_bot.py`** — remove `_load_all_configs`, `_find_customer`, `CUSTOMERS_DIR`; add `OPERATOR_EMAIL`/`BOT_EMAIL` module constants from `os.environ`; remove unknown-sender rejection from webhook; seed `account_id` placeholder in Path 3
+- [x] **Clean `customers/demo/config.json`** — remove `email_addresses`, `operator_email`, `bot_email`
+- [x] **Clean `schemas/customer_config.schema.json`** — remove `email_addresses`, `operator_email`, `bot_email`
+- [x] **Rewrite `tests/test_email_bot.py`** — remove `DEMO_CONFIG`, `TestUnknownSenderRejected`, `_find_customer` tests; mock global env vars; add `TestAnySenderAccepted`; 27 tests passing
+- [x] **Write ADR-011** — `docs/decisions/011-agnostic-email-bot.md`
+- [x] **Update README** — email bot section updated to reflect sender-agnostic behaviour and new env var model
 
-**To verify:**
-- [ ] Confirm `[Clarify-{id}]` survives Gmail's reply subject rewriting (Gmail may strip or alter brackets in subjects)
-- [ ] Add logging to confirm `_handle_clarification` is being reached vs falling through to `_handle_inbound`
-- [ ] If subject matching fails, fall back to matching by `In-Reply-To` header against stored `message_id` from the clarification email
-- [ ] End-to-end test: xlsx → clarification questions → reply → operator plan email → GO → Facebook push
+### Fly.io secrets to set after deploy
+
+```
+OPERATOR_EMAIL=bishopryant@gmail.com
+BOT_EMAIL=traffic@ryanbishop.me
+RESEND_API_KEY=...
+ANTHROPIC_API_KEY=...
+WEBHOOK_SECRET=...
+```

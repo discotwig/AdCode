@@ -2,8 +2,5 @@
   "customer_slug": "demo",
   "account_id": "act_366643171197739",
   "campaigns_dir": "campaigns",
-  "state_dir": "state",
-  "email_addresses": ["bishopryant@gmail.com"],
-  "operator_email": "bishopryant@gmail.com",
-  "bot_email": "traffic@ryanbishop.me"
+  "state_dir": "state"
 }

@@ -4,17 +4,18 @@ Receives inbound emails forwarded by the Cloudflare Email Worker.
 Validates submissions and routes them:
 
   Path 1 — Valid AdCode template (.json passes schema):
-    → Reply client: "Request received and submitted"
+    → Reply sender: "Request received and submitted"
     → Forward template to operator as email attachment
 
   Path 2 — JSON attachment fails schema:
-    → Reply client with specific validation errors and fix instructions
+    → Reply sender with specific validation errors and fix instructions
 
   Path 3 — Dirty Excel or plain-text brief:
     → Seed a starter template via AI ingestion
-    → Reply client with seeded .json attached and review instructions
+    → Reply sender with seeded .json attached and review instructions
 
-The bot holds no Facebook credentials and no state files.
+The bot is sender-agnostic — no per-customer routing or allowlist.
+All settings come from environment variables.
 Engine (plan/apply) runs on the operator's local machine.
 
 Start:
@@ -35,7 +36,7 @@ if str(_REPO_ROOT) not in sys.path:
 import anthropic
 import jsonschema
 from anthropic import APIStatusError
-from dotenv import dotenv_values, load_dotenv
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 
 import markdown as markdown_lib
@@ -49,27 +50,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CUSTOMERS_DIR = _REPO_ROOT / "customers"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+OPERATOR_EMAIL = os.environ.get("OPERATOR_EMAIL", "")
+BOT_EMAIL = os.environ.get("BOT_EMAIL", "traffic@ryanbishop.me")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+ACCOUNT_ID_PLACEHOLDER = "act_REPLACE_WITH_YOUR_ACCOUNT_ID"
 
 app = FastAPI()
 
 
 # ------------------------------------------------------------------
-# Config loading
+# Email helpers
 # ------------------------------------------------------------------
-
-def _load_all_configs() -> list[dict]:
-    configs = []
-    for config_path in CUSTOMERS_DIR.glob("*/config.json"):
-        with open(config_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-        cfg["_config_dir"] = config_path.parent
-        env_path = config_path.parent / ".env"
-        cfg["_env"] = dotenv_values(env_path) if env_path.exists() else {}
-        configs.append(cfg)
-    return configs
-
 
 def _bare_email(addr: str) -> str:
     """Extract bare email from 'Display Name <email@example.com>'."""
@@ -77,21 +71,6 @@ def _bare_email(addr: str) -> str:
         addr = addr.split("<")[-1].rstrip(">")
     return addr.strip().lower()
 
-
-def _find_customer(from_addr: str, configs: list[dict]) -> dict | None:
-    bare = _bare_email(from_addr)
-    for cfg in configs:
-        approved = [a.lower() for a in cfg.get("email_addresses", [])]
-        if bare in approved:
-            return cfg
-        if bare == cfg.get("operator_email", "").lower():
-            return cfg
-    return None
-
-
-# ------------------------------------------------------------------
-# Email parsing
-# ------------------------------------------------------------------
 
 def _parse_raw_email(raw: str) -> dict:
     msg = email_lib.message_from_string(raw)
@@ -135,7 +114,7 @@ def _to_html(text: str) -> str:
 
 
 def _format_schema_errors(errors: list) -> str:
-    """Format jsonschema ValidationErrors into a readable list for the client."""
+    """Format jsonschema ValidationErrors into a readable list for the sender."""
     lines = ["The following issues were found in your template:\n"]
     for i, err in enumerate(errors, 1):
         path = " → ".join(str(p) for p in err.absolute_path) if err.absolute_path else "root"
@@ -151,30 +130,25 @@ def _format_schema_errors(errors: list) -> str:
 # Inbound handler — three-path routing
 # ------------------------------------------------------------------
 
-async def _handle_inbound(parsed: dict, customer: dict):
+async def _handle_inbound(parsed: dict):
     from_addr = parsed["from"]
     subject = parsed["subject"]
-    env: dict = customer["_env"]
-    account_id: str = customer["account_id"]
-    bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
-    operator_email = customer.get("operator_email", "")
-    resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
 
-    def _reply_client(
+    def _reply(
         body_text: str,
         attachment_bytes: bytes | None = None,
         attachment_filename: str | None = None,
     ):
         send_email(EmailMessage(
-            from_=bot_email,
+            from_=BOT_EMAIL,
             to=_bare_email(from_addr),
             subject=f"Re: {subject}",
             html=_to_html(body_text),
-            reply_to=bot_email,
+            reply_to=BOT_EMAIL,
             in_reply_to=parsed["message_id"] or None,
             attachment_bytes=attachment_bytes,
             attachment_filename=attachment_filename,
-        ), resend_key)
+        ), RESEND_API_KEY)
 
     # ------------------------------------------------------------------
     # Path 1 / 2 — JSON attachment present
@@ -183,7 +157,7 @@ async def _handle_inbound(parsed: dict, customer: dict):
         try:
             campaign_json = json.loads(parsed["json_bytes"].decode("utf-8-sig"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            _reply_client(
+            _reply(
                 f"Your template could not be read as JSON: {exc}\n\n"
                 "Please ensure the file is saved as a valid `.json` file and resubmit."
             )
@@ -196,46 +170,39 @@ async def _handle_inbound(parsed: dict, customer: dict):
         )
 
         if not errors:
-            # Path 1 — valid template: ack client, forward to operator
-            _reply_client(
+            # Path 1 — valid template: ack sender, forward to operator
+            _reply(
                 "Your request has been received and submitted for processing. "
                 "You'll hear from us once your campaigns are live."
             )
-            if operator_email:
+            if OPERATOR_EMAIL:
                 send_email(EmailMessage(
-                    from_=bot_email,
-                    to=operator_email,
+                    from_=BOT_EMAIL,
+                    to=OPERATOR_EMAIL,
                     subject=f"[AdCode] Template submission | {subject}",
                     html=_to_html(
                         f"**New template submission**\n\n"
                         f"From: {from_addr}\n"
-                        f"Subject: {subject}\n"
-                        f"Account: `{account_id}`\n\n"
+                        f"Subject: {subject}\n\n"
                         f"The validated template is attached. "
                         f"Save it to `customers/<slug>/campaigns/` and run:\n\n"
                         f"```\npython src/mcp_server.py --config customers/<slug>/config.json\n```"
                     ),
                     attachment_bytes=parsed["json_bytes"],
                     attachment_filename=parsed["json_filename"] or "campaign.json",
-                ), resend_key)
-            logger.info("Valid template forwarded to operator from=%s account=%s", from_addr, account_id)
+                ), RESEND_API_KEY)
+            logger.info("Valid template forwarded to operator from=%s", from_addr)
 
         else:
-            # Path 2 — schema errors: return errors to client, do not forward
-            _reply_client(_format_schema_errors(errors))
-            logger.info(
-                "Schema errors returned to client from=%s errors=%d",
-                from_addr, len(errors),
-            )
+            # Path 2 — schema errors: return errors to sender, do not forward
+            _reply(_format_schema_errors(errors))
+            logger.info("Schema errors returned to sender from=%s errors=%d", from_addr, len(errors))
         return
 
     # ------------------------------------------------------------------
     # Path 3 — xlsx or plain text: seed a starter template
     # ------------------------------------------------------------------
-    ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
-        max_retries=6,
-    )
+    ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, max_retries=6)
 
     if parsed["xlsx_bytes"]:
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
@@ -250,14 +217,14 @@ async def _handle_inbound(parsed: dict, customer: dict):
         ingest_result = extract_from_text(parsed["body"], ai_client)
 
     if not ingest_result.campaigns:
-        _reply_client(
+        _reply(
             "We couldn't extract any campaign definitions from your submission.\n\n"
             "To submit a campaign request, please attach a valid AdCode template (`.json`) "
             "or an Excel file with your campaign details."
         )
         return
 
-    seeded = {"account_id": account_id, "campaigns": ingest_result.campaigns}
+    seeded = {"account_id": ACCOUNT_ID_PLACEHOLDER, "campaigns": ingest_result.campaigns}
     seeded_bytes = json.dumps(seeded, indent=2).encode("utf-8")
 
     body = (
@@ -265,7 +232,8 @@ async def _handle_inbound(parsed: dict, customer: dict):
         "**Next steps:**\n"
         "1. Open the attached `campaign_template.json` file and review every field\n"
         "2. Fill in any fields that are missing or marked incomplete\n"
-        "3. Reply to this email with the completed template attached\n\n"
+        f"3. Replace `{ACCOUNT_ID_PLACEHOLDER}` with your Facebook Ad Account ID (e.g. `act_123456789`)\n"
+        "4. Reply to this email with the completed template attached\n\n"
         "Once we receive your completed template, we'll apply your campaigns and confirm."
     )
 
@@ -273,9 +241,9 @@ async def _handle_inbound(parsed: dict, customer: dict):
         amb_lines = "\n".join(f"- {a.question}" for a in ingest_result.ambiguities)
         body += f"\n\n**Fields that need your attention:**\n{amb_lines}"
 
-    _reply_client(body, attachment_bytes=seeded_bytes, attachment_filename="campaign_template.json")
+    _reply(body, attachment_bytes=seeded_bytes, attachment_filename="campaign_template.json")
     logger.info(
-        "Seeded template returned to client from=%s campaigns=%d ambiguities=%d",
+        "Seeded template returned to sender from=%s campaigns=%d ambiguities=%d",
         from_addr, len(ingest_result.campaigns), len(ingest_result.ambiguities),
     )
 
@@ -294,30 +262,21 @@ async def inbound_webhook(request: Request):
     from_addr: str = data.get("from", "")
     raw: str = data.get("raw", "")
 
-    configs = _load_all_configs()
-    customer = _find_customer(from_addr, configs)
-
-    if customer is None:
-        logger.warning("Rejected email from unknown sender: %s", from_addr)
-        return {"status": "rejected", "reason": "unknown sender"}
-
     parsed = _parse_raw_email(raw)
 
-    # Ensure parsed["from"] is never empty — fall back to the webhook envelope address
+    # Fall back to webhook envelope address if headers didn't parse
     if not parsed["from"]:
         parsed["from"] = from_addr
 
     try:
-        await _handle_inbound(parsed, customer)
+        await _handle_inbound(parsed)
     except APIStatusError as exc:
         if exc.status_code == 529:
             logger.warning("Anthropic overloaded — returning 200 to avoid Worker rejection")
-            bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
-            resend_key = customer["_env"].get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
-            if resend_key and parsed.get("from"):
+            if RESEND_API_KEY and parsed.get("from"):
                 try:
                     send_email(EmailMessage(
-                        from_=bot_email,
+                        from_=BOT_EMAIL,
                         to=_bare_email(parsed["from"]),
                         subject=f"Re: {parsed.get('subject', '')}",
                         html=(
@@ -325,7 +284,7 @@ async def inbound_webhook(request: Request):
                             "Please resend in a few minutes and we'll pick it up right away. "
                             "Sorry for the inconvenience."
                         ),
-                    ), resend_key)
+                    ), RESEND_API_KEY)
                 except Exception:
                     logger.exception("Failed to send overload notice")
         else:

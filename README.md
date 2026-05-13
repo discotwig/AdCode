@@ -35,11 +35,15 @@ Path 2 — JSON with schema errors:
 
 Path 3 — Dirty Excel or plain text:
   → Seed a starter template using AI
-  → Reply to client with template attached
-  → (Client reviews, fills in gaps, resubmits)
+  → Reply to client with template attached (account_id placeholder included)
+  → (Client fills in account_id, reviews, resubmits)
 ```
 
-The email bot holds no Facebook credentials and no state files. See ADR-010 for the full design rationale.
+The bot is **sender-agnostic** — any email that arrives with a valid webhook secret is processed, regardless of sender address. No per-client allowlist is maintained. The `WEBHOOK_SECRET` shared with the Cloudflare Worker is the only security boundary.
+
+Bot settings are global environment variables on Fly.io (`OPERATOR_EMAIL`, `BOT_EMAIL`, `RESEND_API_KEY`, `ANTHROPIC_API_KEY`, `WEBHOOK_SECRET`). Customer configs (`customers/*/config.json`) are for the local MCP server only and contain no email routing fields.
+
+See ADR-010 for the mailroom design rationale. See ADR-011 for the sender-agnostic decision.
 
 ## Operator workflow
 

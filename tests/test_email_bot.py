@@ -1,7 +1,7 @@
-"""Tests for src/email_bot.py — mailroom mode.
+"""Tests for src/email_bot.py — mailroom mode, sender-agnostic.
 
 All external calls (Resend, Anthropic, ingest) are mocked.
-Tests cover the three routing paths and the unknown-sender rejection.
+Global env vars (OPERATOR_EMAIL, BOT_EMAIL, etc.) are patched per test.
 """
 import email as email_lib
 import json
@@ -9,36 +9,85 @@ import textwrap
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src.email_bot import app, _bare_email, _find_customer, _parse_raw_email
+from src.email_bot import app, _bare_email, _parse_raw_email, ACCOUNT_ID_PLACEHOLDER
 
 
 # ---------------------------------------------------------------------------
-# Shared fixtures / helpers
+# Email building helpers
 # ---------------------------------------------------------------------------
 
-DEMO_CONFIG = {
-    "customer_slug": "demo",
-    "account_id": "act_123",
-    "state_dir": "state",
-    "campaigns_dir": "campaigns",
-    "email_addresses": ["client@example.com"],
-    "operator_email": "operator@example.com",
-    "bot_email": "traffic@ryanbishop.me",
-    "_config_dir": Path("/fake/customers/demo"),
-    "_env": {
-        "ANTHROPIC_API_KEY": "anth_key",
-        "RESEND_API_KEY": "re_key",
-    },
+def _make_raw_plain(from_addr="anyone@example.com", subject="Test", body="Hello"):
+    return textwrap.dedent(f"""\
+        From: {from_addr}
+        To: traffic@ryanbishop.me
+        Subject: {subject}
+        Message-ID: <test123@mail.example.com>
+        Content-Type: text/plain; charset=utf-8
+
+        {body}
+    """)
+
+
+def _make_raw_with_json_attachment(json_data: dict, from_addr="anyone@example.com", subject="Campaign update"):
+    msg = MIMEMultipart()
+    msg["From"] = from_addr
+    msg["To"] = "traffic@ryanbishop.me"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<json123@mail.example.com>"
+    msg.attach(MIMEText("Please process the attached template.", "plain"))
+    json_bytes = json.dumps(json_data).encode("utf-8")
+    attachment = MIMEApplication(json_bytes, Name="campaign.json")
+    attachment["Content-Disposition"] = 'attachment; filename="campaign.json"'
+    msg.attach(attachment)
+    return msg.as_string()
+
+
+def _make_raw_with_xlsx_attachment(xlsx_bytes: bytes, from_addr="anyone@example.com", subject="Brief"):
+    msg = MIMEMultipart()
+    msg["From"] = from_addr
+    msg["To"] = "traffic@ryanbishop.me"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<xlsx123@mail.example.com>"
+    msg.attach(MIMEText("Please create campaigns from the attached brief.", "plain"))
+    attachment = MIMEApplication(xlsx_bytes, Name="brief.xlsx")
+    attachment["Content-Disposition"] = 'attachment; filename="brief.xlsx"'
+    msg.attach(attachment)
+    return msg.as_string()
+
+
+def _post(client: TestClient, raw: str, from_addr="anyone@example.com") -> dict:
+    response = client.post("/inbound", json={"from": from_addr, "raw": raw})
+    assert response.status_code == 200
+    return response.json()
+
+
+# ---------------------------------------------------------------------------
+# Shared env var patch
+# ---------------------------------------------------------------------------
+
+ENV_PATCH = {
+    "src.email_bot.OPERATOR_EMAIL": "operator@example.com",
+    "src.email_bot.BOT_EMAIL": "traffic@ryanbishop.me",
+    "src.email_bot.RESEND_API_KEY": "re_test_key",
+    "src.email_bot.ANTHROPIC_API_KEY": "anth_test_key",
 }
 
+
+def _env_patches():
+    return [patch(k, v) for k, v in ENV_PATCH.items()]
+
+
+# ---------------------------------------------------------------------------
+# Valid and invalid template fixtures
+# ---------------------------------------------------------------------------
+
 VALID_TEMPLATE = {
-    "account_id": "act_123",
+    "account_id": "act_123456789",
     "campaigns": [
         {
             "name": "Summer Sale",
@@ -66,64 +115,8 @@ VALID_TEMPLATE = {
 
 INVALID_TEMPLATE = {
     "account_id": "act_123",
-    "campaigns": [
-        {
-            "name": "Bad Campaign",
-            # missing required fields: objective, status, special_ad_categories, ad_sets
-        }
-    ],
+    "campaigns": [{"name": "Bad Campaign"}],  # missing required fields
 }
-
-
-def _make_raw_plain(from_addr="client@example.com", subject="Test", body="Hello"):
-    """Build a raw plain-text email string."""
-    return textwrap.dedent(f"""\
-        From: {from_addr}
-        To: traffic@ryanbishop.me
-        Subject: {subject}
-        Message-ID: <test123@mail.example.com>
-        Content-Type: text/plain; charset=utf-8
-
-        {body}
-    """)
-
-
-def _make_raw_with_json_attachment(json_data: dict, from_addr="client@example.com", subject="Campaign update"):
-    """Build a raw multipart email with a JSON file attached."""
-    msg = MIMEMultipart()
-    msg["From"] = from_addr
-    msg["To"] = "traffic@ryanbishop.me"
-    msg["Subject"] = subject
-    msg["Message-ID"] = "<json123@mail.example.com>"
-    msg.attach(MIMEText("Please process the attached template.", "plain"))
-    json_bytes = json.dumps(json_data).encode("utf-8")
-    attachment = MIMEApplication(json_bytes, Name="campaign.json")
-    attachment["Content-Disposition"] = 'attachment; filename="campaign.json"'
-    msg.attach(attachment)
-    return msg.as_string()
-
-
-def _make_raw_with_xlsx_attachment(xlsx_bytes: bytes, from_addr="client@example.com", subject="Brief"):
-    """Build a raw multipart email with an xlsx file attached."""
-    msg = MIMEMultipart()
-    msg["From"] = from_addr
-    msg["To"] = "traffic@ryanbishop.me"
-    msg["Subject"] = subject
-    msg["Message-ID"] = "<xlsx123@mail.example.com>"
-    msg.attach(MIMEText("Please create campaigns from the attached brief.", "plain"))
-    attachment = MIMEApplication(xlsx_bytes, Name="brief.xlsx")
-    attachment["Content-Disposition"] = 'attachment; filename="brief.xlsx"'
-    msg.attach(attachment)
-    return msg.as_string()
-
-
-def _post(client: TestClient, raw: str, from_addr="client@example.com") -> dict:
-    response = client.post(
-        "/inbound",
-        json={"from": from_addr, "raw": raw},
-    )
-    assert response.status_code == 200
-    return response.json()
 
 
 # ---------------------------------------------------------------------------
@@ -136,21 +129,6 @@ def test_bare_email_plain():
 
 def test_bare_email_display_name():
     assert _bare_email("Alice Smith <alice@example.com>") == "alice@example.com"
-
-
-def test_find_customer_approved_sender():
-    customer = _find_customer("client@example.com", [DEMO_CONFIG])
-    assert customer is not None
-    assert customer["customer_slug"] == "demo"
-
-
-def test_find_customer_operator_sender():
-    customer = _find_customer("operator@example.com", [DEMO_CONFIG])
-    assert customer is not None
-
-
-def test_find_customer_unknown_returns_none():
-    assert _find_customer("unknown@other.com", [DEMO_CONFIG]) is None
 
 
 def test_parse_raw_email_plain_text():
@@ -167,7 +145,7 @@ def test_parse_raw_email_json_attachment():
     assert parsed["json_bytes"] is not None
     assert parsed["json_filename"] == "campaign.json"
     recovered = json.loads(parsed["json_bytes"].decode("utf-8"))
-    assert recovered["account_id"] == "act_123"
+    assert recovered["account_id"] == "act_123456789"
 
 
 def test_parse_raw_email_xlsx_attachment():
@@ -178,195 +156,222 @@ def test_parse_raw_email_xlsx_attachment():
     assert parsed["json_bytes"] is None
 
 
+def test_account_id_placeholder_format():
+    assert ACCOUNT_ID_PLACEHOLDER.startswith("act_")
+
+
 # ---------------------------------------------------------------------------
-# Integration tests — webhook routing
+# Any sender is accepted
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def mock_configs():
-    with patch("src.email_bot._load_all_configs", return_value=[DEMO_CONFIG]):
-        yield
+class TestAnySenderAccepted:
+    def test_unknown_sender_returns_ok(self):
+        with patch("src.email_bot.send_email"):
+            patches = _env_patches()
+            for p in patches:
+                p.start()
+            try:
+                with TestClient(app) as client:
+                    result = _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE), from_addr="stranger@unknown.com")
+            finally:
+                for p in patches:
+                    p.stop()
+        assert result["status"] == "ok"
+
+    def test_any_email_address_is_processed(self):
+        """The bot does not maintain an allowlist — all senders are handled."""
+        sent = []
+        with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            patches = _env_patches()
+            for p in patches:
+                p.start()
+            try:
+                with TestClient(app) as client:
+                    _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE), from_addr="random@whoever.com")
+            finally:
+                for p in patches:
+                    p.stop()
+        assert len(sent) == 2  # ack to sender + forward to operator
 
 
-@pytest.fixture
-def mock_send_email():
-    with patch("src.email_bot.send_email") as mock:
-        yield mock
-
-
-class TestUnknownSenderRejected:
-    def test_unknown_sender_returns_rejected(self, mock_configs):
-        with TestClient(app) as client:
-            response = client.post(
-                "/inbound",
-                json={"from": "stranger@unknown.com", "raw": _make_raw_plain(from_addr="stranger@unknown.com")},
-            )
-        assert response.status_code == 200
-        assert response.json()["status"] == "rejected"
-
-    def test_unknown_sender_does_not_send_email(self, mock_configs, mock_send_email):
-        with TestClient(app) as client:
-            client.post(
-                "/inbound",
-                json={"from": "stranger@unknown.com", "raw": _make_raw_plain(from_addr="stranger@unknown.com")},
-            )
-        mock_send_email.assert_not_called()
-
+# ---------------------------------------------------------------------------
+# Path 1 — Valid template
+# ---------------------------------------------------------------------------
 
 class TestPath1ValidTemplate:
-    """Valid JSON template → ack client + forward to operator."""
+    def _run(self, from_addr="client@example.com"):
+        sent = []
+        patches = _env_patches()
+        for p in patches:
+            p.start()
+        try:
+            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+                with TestClient(app) as client:
+                    result = _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE, from_addr=from_addr))
+        finally:
+            for p in patches:
+                p.stop()
+        return result, sent
 
-    def test_returns_ok(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(VALID_TEMPLATE)
-        with TestClient(app) as client:
-            result = _post(client, raw)
+    def test_returns_ok(self):
+        result, _ = self._run()
         assert result["status"] == "ok"
 
-    def test_sends_two_emails(self, mock_configs, mock_send_email):
-        """One ack to client, one forward to operator."""
-        raw = _make_raw_with_json_attachment(VALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        assert mock_send_email.call_count == 2
+    def test_sends_two_emails(self):
+        _, sent = self._run()
+        assert len(sent) == 2
 
-    def test_client_ack_contains_received_language(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(VALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        client_call = mock_send_email.call_args_list[0]
-        msg = client_call[0][0]
-        assert _bare_email(msg.to) == "client@example.com"
-        assert "received" in msg.html.lower() or "submitted" in msg.html.lower()
+    def test_client_ack_sent_to_sender(self):
+        _, sent = self._run(from_addr="client@example.com")
+        ack = sent[0]
+        assert _bare_email(ack.to) == "client@example.com"
+        assert "received" in ack.html.lower() or "submitted" in ack.html.lower()
 
-    def test_operator_email_has_attachment(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(VALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        operator_call = mock_send_email.call_args_list[1]
-        msg = operator_call[0][0]
-        assert msg.to == "operator@example.com"
-        assert msg.attachment_bytes is not None
-        assert msg.attachment_filename == "campaign.json"
+    def test_operator_email_has_attachment(self):
+        _, sent = self._run()
+        op = sent[1]
+        assert op.to == "operator@example.com"
+        assert op.attachment_bytes is not None
+        assert op.attachment_filename == "campaign.json"
 
-    def test_operator_email_subject_contains_adcode_tag(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(VALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        operator_call = mock_send_email.call_args_list[1]
-        msg = operator_call[0][0]
-        assert "[AdCode]" in msg.subject
+    def test_operator_subject_contains_adcode_tag(self):
+        _, sent = self._run()
+        assert "[AdCode]" in sent[1].subject
 
+    def test_no_operator_email_when_operator_not_configured(self):
+        sent = []
+        patches = _env_patches() + [patch("src.email_bot.OPERATOR_EMAIL", "")]
+        for p in patches:
+            p.start()
+        try:
+            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+                with TestClient(app) as client:
+                    _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE))
+        finally:
+            for p in patches:
+                p.stop()
+        assert len(sent) == 1  # only the ack, no forward
+
+
+# ---------------------------------------------------------------------------
+# Path 2 — Invalid template
+# ---------------------------------------------------------------------------
 
 class TestPath2InvalidTemplate:
-    """JSON attachment fails schema → reply with errors, no operator email."""
+    def _run(self):
+        sent = []
+        patches = _env_patches()
+        for p in patches:
+            p.start()
+        try:
+            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+                with TestClient(app) as client:
+                    result = _post(client, _make_raw_with_json_attachment(INVALID_TEMPLATE))
+        finally:
+            for p in patches:
+                p.stop()
+        return result, sent
 
-    def test_returns_ok(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(INVALID_TEMPLATE)
-        with TestClient(app) as client:
-            result = _post(client, raw)
+    def test_returns_ok(self):
+        result, _ = self._run()
         assert result["status"] == "ok"
 
-    def test_sends_one_email_only(self, mock_configs, mock_send_email):
-        """Only the client error reply — no operator forward."""
-        raw = _make_raw_with_json_attachment(INVALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        assert mock_send_email.call_count == 1
+    def test_sends_one_email_only(self):
+        _, sent = self._run()
+        assert len(sent) == 1  # error reply only, no operator forward
 
-    def test_error_reply_goes_to_client(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(INVALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert _bare_email(msg.to) == "client@example.com"
+    def test_error_reply_goes_to_sender(self):
+        _, sent = self._run()
+        assert _bare_email(sent[0].to) == "anyone@example.com"
 
-    def test_error_reply_mentions_issues(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(INVALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert "issue" in msg.html.lower() or "error" in msg.html.lower() or "found" in msg.html.lower()
+    def test_error_reply_mentions_issues(self):
+        _, sent = self._run()
+        assert "issue" in sent[0].html.lower() or "found" in sent[0].html.lower()
 
-    def test_no_attachment_on_error_reply(self, mock_configs, mock_send_email):
-        raw = _make_raw_with_json_attachment(INVALID_TEMPLATE)
-        with TestClient(app) as client:
-            _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert msg.attachment_bytes is None
+    def test_no_attachment_on_error_reply(self):
+        _, sent = self._run()
+        assert sent[0].attachment_bytes is None
 
 
-class TestPath3DirtyExcelSeeding:
-    """xlsx attachment → seed template → reply client with template."""
+# ---------------------------------------------------------------------------
+# Path 3 — Dirty Excel / plain text seeding
+# ---------------------------------------------------------------------------
 
+class TestPath3Seeding:
     def _mock_ingest_result(self):
         from src.services.ingest import IngestionResult
-        return IngestionResult(
-            campaigns=VALID_TEMPLATE["campaigns"],
-            ambiguities=[],
-            confidence=0.9,
-        )
+        return IngestionResult(campaigns=VALID_TEMPLATE["campaigns"], ambiguities=[], confidence=0.9)
 
-    def test_seeds_template_and_replies(self, mock_configs, mock_send_email):
-        with patch("src.email_bot.read_excel", return_value={}), \
-             patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
-             patch("src.email_bot.anthropic.Anthropic"):
-            raw = _make_raw_with_xlsx_attachment(b"fakexlsx")
-            with TestClient(app) as client:
-                result = _post(client, raw)
+    def _run_xlsx(self):
+        sent = []
+        patches = _env_patches()
+        for p in patches:
+            p.start()
+        try:
+            with patch("src.email_bot.read_excel", return_value={}), \
+                 patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
+                 patch("src.email_bot.anthropic.Anthropic"), \
+                 patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+                with TestClient(app) as client:
+                    result = _post(client, _make_raw_with_xlsx_attachment(b"fakexlsx"))
+        finally:
+            for p in patches:
+                p.stop()
+        return result, sent
+
+    def test_returns_ok(self):
+        result, _ = self._run_xlsx()
         assert result["status"] == "ok"
-        assert mock_send_email.call_count == 1
 
-    def test_reply_has_json_attachment(self, mock_configs, mock_send_email):
-        with patch("src.email_bot.read_excel", return_value={}), \
-             patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
-             patch("src.email_bot.anthropic.Anthropic"):
-            raw = _make_raw_with_xlsx_attachment(b"fakexlsx")
-            with TestClient(app) as client:
-                _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert msg.attachment_bytes is not None
-        assert msg.attachment_filename == "campaign_template.json"
+    def test_sends_one_email(self):
+        _, sent = self._run_xlsx()
+        assert len(sent) == 1
 
-    def test_reply_instructs_client_to_review(self, mock_configs, mock_send_email):
-        with patch("src.email_bot.read_excel", return_value={}), \
-             patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
-             patch("src.email_bot.anthropic.Anthropic"):
-            raw = _make_raw_with_xlsx_attachment(b"fakexlsx")
-            with TestClient(app) as client:
-                _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert "review" in msg.html.lower() or "resubmit" in msg.html.lower()
+    def test_reply_has_json_attachment(self):
+        _, sent = self._run_xlsx()
+        assert sent[0].attachment_bytes is not None
+        assert sent[0].attachment_filename == "campaign_template.json"
 
-    def test_reply_goes_to_client_not_operator(self, mock_configs, mock_send_email):
-        with patch("src.email_bot.read_excel", return_value={}), \
-             patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
-             patch("src.email_bot.anthropic.Anthropic"):
-            raw = _make_raw_with_xlsx_attachment(b"fakexlsx")
-            with TestClient(app) as client:
-                _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert _bare_email(msg.to) == "client@example.com"
+    def test_seeded_template_contains_placeholder(self):
+        _, sent = self._run_xlsx()
+        seeded = json.loads(sent[0].attachment_bytes.decode("utf-8"))
+        assert seeded["account_id"] == ACCOUNT_ID_PLACEHOLDER
 
-    def test_plain_text_also_seeds_template(self, mock_configs, mock_send_email):
+    def test_reply_instructs_to_replace_account_id(self):
+        _, sent = self._run_xlsx()
+        assert ACCOUNT_ID_PLACEHOLDER in sent[0].html
+
+    def test_reply_instructs_to_review_and_resubmit(self):
+        _, sent = self._run_xlsx()
+        assert "review" in sent[0].html.lower() or "resubmit" in sent[0].html.lower()
+
+    def test_plain_text_also_seeds_template(self):
         from src.services.ingest import IngestionResult
-        ingest_result = IngestionResult(
-            campaigns=VALID_TEMPLATE["campaigns"],
-            ambiguities=[],
-            confidence=0.85,
-        )
-        with patch("src.email_bot.extract_from_text", return_value=ingest_result), \
-             patch("src.email_bot.anthropic.Anthropic"):
-            raw = _make_raw_plain(body="Create a brand awareness campaign with $5000 budget.")
-            with TestClient(app) as client:
-                _post(client, raw)
-        msg = mock_send_email.call_args[0][0]
-        assert msg.attachment_bytes is not None
-        assert msg.attachment_filename == "campaign_template.json"
+        ingest_result = IngestionResult(campaigns=VALID_TEMPLATE["campaigns"], ambiguities=[], confidence=0.85)
+        sent = []
+        patches = _env_patches()
+        for p in patches:
+            p.start()
+        try:
+            with patch("src.email_bot.extract_from_text", return_value=ingest_result), \
+                 patch("src.email_bot.anthropic.Anthropic"), \
+                 patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+                with TestClient(app) as client:
+                    _post(client, _make_raw_plain(body="Create a brand awareness campaign."))
+        finally:
+            for p in patches:
+                p.stop()
+        assert sent[0].attachment_bytes is not None
+        seeded = json.loads(sent[0].attachment_bytes.decode("utf-8"))
+        assert seeded["account_id"] == ACCOUNT_ID_PLACEHOLDER
 
 
-class TestHealthEndpoint:
-    def test_health_returns_ok(self):
-        with TestClient(app) as client:
-            response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+# ---------------------------------------------------------------------------
+# Health endpoint
+# ---------------------------------------------------------------------------
+
+def test_health_returns_ok():
+    with TestClient(app) as client:
+        response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
