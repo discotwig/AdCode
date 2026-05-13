@@ -1,0 +1,11 @@
+# Dependencies for the Fly.io email bot (mailroom only).
+# Excludes facebook-business and mcp — the engine does not run on Fly.io.
+openpyxl>=3.1.0
+jsonschema>=4.23.0
+python-dotenv>=1.0.0
+anthropic>=0.40.0
+resend>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+markdown>=3.6

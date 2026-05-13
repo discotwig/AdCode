@@ -334,6 +334,46 @@ Several bugs discovered during real-world testing of the email bot. None have re
 - [x] **Account ID in ambiguity questions** — prompts were flagging missing `account_id` as an ambiguity; suppressed since it comes from `config.json`
 - [x] **Ambiguity email format** — redesigned to multiple-choice lettered questions with suggested options; campaign summary as a table
 
+---
+
+## Phase 17 — Email Bot Refactor: Mailroom Architecture (ADR-010)
+
+Decouple the email bot from the engine. The bot validates and routes submissions; the engine runs locally. See ADR-010 for full rationale.
+
+### Documentation
+
+- [x] **Write ADR-010** — `docs/decisions/010-mailroom-engine-split.md`; documents mailroom role, three submission paths, local engine rationale
+- [x] **Update README** — operator workflow, updated email bot description, CLI smoke test examples
+
+### Email bot refactor (`src/email_bot.py`)
+
+- [ ] **Remove engine imports** — remove `MetaClient`, `StateFile`, `plan`, `apply as apply_plan`, `validate_all` imports
+- [ ] **Remove pending file system** — delete `_scan_expired_pending()`, lifespan context manager, `.pending_*` file read/write, `PENDING_EXPIRY_HOURS`
+- [ ] **Remove GO/HOLD flow** — delete `_handle_operator_reply()`, operator reply routing, `_format_plan_text()`
+- [ ] **Remove clarification loop** — delete `_handle_clarification()`, `_APPLY_CLARIFICATIONS` prompt, `.clarifying_*` file logic
+- [ ] **Implement three-path routing** in `_handle_inbound()`:
+  - Path 1 (valid JSON template): reply client ack + forward template to operator as attachment
+  - Path 2 (JSON fails schema): reply client with specific `jsonschema` errors and fix instructions; do not forward
+  - Path 3 (xlsx or plain text): seed template via `ingest_excel` / `extract_from_text`; reply client with `.json` attachment and review instructions
+- [ ] **Remove `_APPLY_CLARIFICATIONS` and related prompts** from `src/prompts.py` if present
+
+### Infrastructure
+
+- [ ] **Create `requirements-email.txt`** — copy of `requirements.txt` without `facebook-business` SDK; used by Fly.io image
+- [ ] **Update `Dockerfile`** — use `requirements-email.txt` instead of `requirements.txt`
+- [ ] **Update `entrypoint.sh`** if needed to reflect removed pending scan
+
+### MCP server
+
+- [ ] **Add startup connection check** to `src/mcp_server.py` when `--config` is used — call `client.list_campaigns(account_id)` with a single result; log success or exit with clear error on failure
+- [ ] **Add `--skip-connection-check` flag** for offline/test use
+
+### Tests
+
+- [ ] **Rewrite `tests/test_email_bot.py`** — cover three-path routing: valid template (operator forward + client ack), invalid template (errors returned), dirty Excel (seeded template returned), unknown sender (rejected)
+- [ ] **Delete `tests/test_pending_expiry.py`** — pending file mechanism removed
+- [ ] **Add `--config` connection check test** to `tests/test_mcp_server.py`
+
 ### Active bug — clarification reply loop
 
 **Symptom:** Client replies with answers (e.g. "A-a, B-b") but receives another round of the same clarification questions instead of a plan email.

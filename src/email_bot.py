@@ -1,7 +1,21 @@
-"""Email bot webhook server.
+"""Email bot webhook server — mailroom mode.
 
-Receives inbound emails forwarded by the Cloudflare Email Worker, dispatches
-them through the plan-review pipeline, and sends outbound replies via Resend.
+Receives inbound emails forwarded by the Cloudflare Email Worker.
+Validates submissions and routes them:
+
+  Path 1 — Valid AdCode template (.json passes schema):
+    → Reply client: "Request received and submitted"
+    → Forward template to operator as email attachment
+
+  Path 2 — JSON attachment fails schema:
+    → Reply client with specific validation errors and fix instructions
+
+  Path 3 — Dirty Excel or plain-text brief:
+    → Seed a starter template via AI ingestion
+    → Reply client with seeded .json attached and review instructions
+
+The bot holds no Facebook credentials and no state files.
+Engine (plan/apply) runs on the operator's local machine.
 
 Start:
     uvicorn src.email_bot:app --host 0.0.0.0 --port 8080
@@ -10,11 +24,8 @@ import email as email_lib
 import json
 import logging
 import os
-import re
 import sys
 import tempfile
-import uuid
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,21 +33,17 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import anthropic
+import jsonschema
 from anthropic import APIStatusError
 from dotenv import dotenv_values, load_dotenv
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 
 import markdown as markdown_lib
 
-from src.api.meta import MetaClient
 from src.services.email import send_email, EmailMessage
 from src.services.ingest import read_excel, extract_campaigns
-from src.prompts import AMBIGUITY_EMAIL
 from src.services.brief import extract_from_text
-from src.services.state import StateFile
-from src.services.validate import validate_all
-from src.traffic import plan, apply as apply_plan
+from src.traffic import _CAMPAIGN_SCHEMA
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -45,65 +52,7 @@ logger = logging.getLogger(__name__)
 CUSTOMERS_DIR = _REPO_ROOT / "customers"
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-PENDING_EXPIRY_HOURS = 24
-
-
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    try:
-        _scan_expired_pending()
-    except Exception:
-        logger.exception("Expired pending scan failed on startup")
-    yield
-
-
-app = FastAPI(lifespan=_lifespan)
-
-
-# ------------------------------------------------------------------
-# Startup — expired pending brief sweep
-# ------------------------------------------------------------------
-
-
-def _scan_expired_pending():
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=PENDING_EXPIRY_HOURS)
-    configs = _load_all_configs()
-    for customer in configs:
-        config_dir: Path = customer["_config_dir"]
-        env: dict = customer["_env"]
-        state_dir = config_dir / customer.get("state_dir", "state")
-        bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
-        operator_email = customer.get("operator_email", "")
-        resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
-
-        for pending_path in sorted(state_dir.glob(".pending_*.json")):
-            try:
-                pending = json.loads(pending_path.read_text(encoding="utf-8"))
-                created_at = datetime.fromisoformat(pending["created_at"])
-                if created_at >= cutoff:
-                    continue
-                # Expired — notify operator and clean up
-                client_from = pending.get("client_from", "unknown")
-                client_subject = pending.get("client_subject", "(no subject)")
-                created_str = created_at.strftime("%Y-%m-%d %H:%M UTC")
-                body = (
-                    f"A pending brief expired without a GO/HOLD response and was discarded.\n\n"
-                    f"From: {client_from}\n"
-                    f"Subject: {client_subject}\n"
-                    f"Received: {created_str}\n\n"
-                    f"If this brief should be actioned, ask the client to resend."
-                )
-                if operator_email and resend_key:
-                    send_email(EmailMessage(
-                        from_=bot_email,
-                        to=operator_email,
-                        subject=f"[AdCode] Expired brief: {client_subject}",
-                        html=_to_html(body),
-                    ), resend_key)
-                pending_path.unlink()
-                logger.info("Expired pending_id=%s from=%s", pending.get("pending_id"), client_from)
-            except Exception:
-                logger.exception("Failed to process expired pending file %s", pending_path)
+app = FastAPI()
 
 
 # ------------------------------------------------------------------
@@ -154,6 +103,8 @@ def _parse_raw_email(raw: str) -> dict:
         "body": "",
         "xlsx_bytes": None,
         "xlsx_filename": None,
+        "json_bytes": None,
+        "json_filename": None,
     }
     if msg.is_multipart():
         for part in msg.walk():
@@ -167,6 +118,9 @@ def _parse_raw_email(raw: str) -> dict:
             elif fn and fn.lower().endswith(".xlsx") and result["xlsx_bytes"] is None:
                 result["xlsx_bytes"] = part.get_payload(decode=True)
                 result["xlsx_filename"] = fn
+            elif fn and fn.lower().endswith(".json") and result["json_bytes"] is None:
+                result["json_bytes"] = part.get_payload(decode=True)
+                result["json_filename"] = fn
     else:
         payload = msg.get_payload(decode=True)
         if payload:
@@ -180,80 +134,37 @@ def _to_html(text: str) -> str:
     return markdown_lib.markdown(text, extensions=["nl2br", "tables"])
 
 
-# ------------------------------------------------------------------
-# Plan formatting
-# ------------------------------------------------------------------
-
-def _format_plan_text(p) -> str:
-    lines = [p.summary(), ""]
-    for op in p.operations:
-        op_type = type(op).__name__
-        cname = getattr(op, "campaign_name", None) or getattr(op, "campaign", {}).get("name", "")
-        aname = getattr(op, "adset_name", "")
-        fb_id = getattr(op, "fb_id", "")
-        if op_type.startswith("Delete"):
-            label = op_type.replace("Delete", "").lower()
-            detail = " / ".join(filter(None, [cname, aname]))
-            lines.append(f"  DELETE {label}: \"{detail}\"  (fb_id: {fb_id})")
-        elif hasattr(op, "changed_fields"):
-            suffix = f" / {aname}" if aname else ""
-            lines.append(f"  {op_type}: {cname}{suffix} — {list(op.changed_fields.keys())}")
-        else:
-            suffix = f" / {aname}" if aname else ""
-            lines.append(f"  {op_type}: {cname}{suffix}")
+def _format_schema_errors(errors: list) -> str:
+    """Format jsonschema ValidationErrors into a readable list for the client."""
+    lines = ["The following issues were found in your template:\n"]
+    for i, err in enumerate(errors, 1):
+        path = " → ".join(str(p) for p in err.absolute_path) if err.absolute_path else "root"
+        lines.append(f"{i}. **{path}**: {err.message}")
+    lines.append(
+        "\nPlease fix these issues and resubmit your template. "
+        "If you need help, reply to this email with your questions."
+    )
     return "\n".join(lines)
 
 
-_APPLY_CLARIFICATIONS = """\
-You are an ad trafficking assistant. A campaign brief was partially extracted and sent to the
-client for clarification. Apply their answers to the draft campaigns.
-
-Draft campaigns (JSON):
-{campaigns_json}
-
-Questions that were asked:
-{questions}
-
-Client's reply thread (find their answers here):
-{reply_body}
-
-Instructions:
-1. Parse the client's answers — they may say "A-a, B-b", "a, a, a, a", or write them out in prose.
-2. Apply each answer to the correct field in the draft campaigns.
-3. Return updated campaigns with the answers applied.
-4. Only flag remaining ambiguities for fields still genuinely unclear after reading everything.
-5. Do NOT flag account_id — it is supplied externally.
-6. Do NOT re-flag anything already answered in this thread.
-
-Respond with a JSON object:
-- "campaigns": updated array of campaign objects
-- "ambiguities": only genuinely unresolved gaps (same structure as before)
-- "confidence": float 0.0–1.0
-
-Return only the JSON object, no other text."""
-
-
 # ------------------------------------------------------------------
-# Inbound handler — new brief from client
+# Inbound handler — three-path routing
 # ------------------------------------------------------------------
 
 async def _handle_inbound(parsed: dict, customer: dict):
-    subject = parsed["subject"]
     from_addr = parsed["from"]
-    config_dir: Path = customer["_config_dir"]
+    subject = parsed["subject"]
     env: dict = customer["_env"]
     account_id: str = customer["account_id"]
-    state_dir = config_dir / customer.get("state_dir", "state")
     bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
     operator_email = customer.get("operator_email", "")
     resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
 
-    ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
-        max_retries=6,
-    )
-
-    def _reply_client(body_text: str):
+    def _reply_client(
+        body_text: str,
+        attachment_bytes: bytes | None = None,
+        attachment_filename: str | None = None,
+    ):
         send_email(EmailMessage(
             from_=bot_email,
             to=_bare_email(from_addr),
@@ -261,9 +172,71 @@ async def _handle_inbound(parsed: dict, customer: dict):
             html=_to_html(body_text),
             reply_to=bot_email,
             in_reply_to=parsed["message_id"] or None,
+            attachment_bytes=attachment_bytes,
+            attachment_filename=attachment_filename,
         ), resend_key)
 
-    # --- Extract campaigns ---
+    # ------------------------------------------------------------------
+    # Path 1 / 2 — JSON attachment present
+    # ------------------------------------------------------------------
+    if parsed["json_bytes"]:
+        try:
+            campaign_json = json.loads(parsed["json_bytes"].decode("utf-8-sig"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            _reply_client(
+                f"Your template could not be read as JSON: {exc}\n\n"
+                "Please ensure the file is saved as a valid `.json` file and resubmit."
+            )
+            return
+
+        validator = jsonschema.Draft7Validator(_CAMPAIGN_SCHEMA)
+        errors = sorted(
+            validator.iter_errors(campaign_json),
+            key=lambda e: list(e.absolute_path),
+        )
+
+        if not errors:
+            # Path 1 — valid template: ack client, forward to operator
+            _reply_client(
+                "Your request has been received and submitted for processing. "
+                "You'll hear from us once your campaigns are live."
+            )
+            if operator_email:
+                send_email(EmailMessage(
+                    from_=bot_email,
+                    to=operator_email,
+                    subject=f"[AdCode] Template submission | {subject}",
+                    html=_to_html(
+                        f"**New template submission**\n\n"
+                        f"From: {from_addr}\n"
+                        f"Subject: {subject}\n"
+                        f"Account: `{account_id}`\n\n"
+                        f"The validated template is attached. "
+                        f"Save it to `customers/<slug>/campaigns/` and run:\n\n"
+                        f"```\npython src/mcp_server.py --config customers/<slug>/config.json\n```"
+                    ),
+                    attachment_bytes=parsed["json_bytes"],
+                    attachment_filename=parsed["json_filename"] or "campaign.json",
+                ), resend_key)
+            logger.info("Valid template forwarded to operator from=%s account=%s", from_addr, account_id)
+
+        else:
+            # Path 2 — schema errors: return errors to client, do not forward
+            _reply_client(_format_schema_errors(errors))
+            logger.info(
+                "Schema errors returned to client from=%s errors=%d",
+                from_addr, len(errors),
+            )
+        return
+
+    # ------------------------------------------------------------------
+    # Path 3 — xlsx or plain text: seed a starter template
+    # ------------------------------------------------------------------
+    ai_client = anthropic.Anthropic(
+        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
+        max_retries=6,
+    )
+
     if parsed["xlsx_bytes"]:
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp.write(parsed["xlsx_bytes"])
@@ -278,343 +251,33 @@ async def _handle_inbound(parsed: dict, customer: dict):
 
     if not ingest_result.campaigns:
         _reply_client(
-            "We couldn't extract any campaign definitions from your brief. "
-            "Please send an Excel file or a more detailed plain-text description."
+            "We couldn't extract any campaign definitions from your submission.\n\n"
+            "To submit a campaign request, please attach a valid AdCode template (`.json`) "
+            "or an Excel file with your campaign details."
         )
         return
+
+    seeded = {"account_id": account_id, "campaigns": ingest_result.campaigns}
+    seeded_bytes = json.dumps(seeded, indent=2).encode("utf-8")
+
+    body = (
+        "We've created a starter template from your submission — it's attached to this email.\n\n"
+        "**Next steps:**\n"
+        "1. Open the attached `campaign_template.json` file and review every field\n"
+        "2. Fill in any fields that are missing or marked incomplete\n"
+        "3. Reply to this email with the completed template attached\n\n"
+        "Once we receive your completed template, we'll apply your campaigns and confirm."
+    )
 
     if ingest_result.ambiguities:
-        ambiguity_list = "\n".join(
-            f"- {a.question}" for a in ingest_result.ambiguities
-        )
-        consultant_prompt = AMBIGUITY_EMAIL.format(
-            subject=subject,
-            campaigns_json=json.dumps(ingest_result.campaigns, indent=2),
-            ambiguity_list=ambiguity_list,
-        )
-        amb_response = ai_client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": consultant_prompt}],
-        )
-        questions_text = amb_response.content[0].text.strip()
+        amb_lines = "\n".join(f"- {a.question}" for a in ingest_result.ambiguities)
+        body += f"\n\n**Fields that need your attention:**\n{amb_lines}"
 
-        # Save clarification state so the reply handler can apply answers
-        clarify_id = uuid.uuid4().hex[:8]
-        state_dir.mkdir(parents=True, exist_ok=True)
-        clarify_path = state_dir / f".clarifying_{clarify_id}.json"
-        clarify_path.write_text(json.dumps({
-            "clarify_id": clarify_id,
-            "client_from": from_addr,
-            "client_subject": subject,
-            "campaigns": ingest_result.campaigns,
-            "questions": questions_text,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }, indent=2), encoding="utf-8")
-
-        send_email(EmailMessage(
-            from_=bot_email,
-            to=_bare_email(from_addr),
-            subject=f"Re: [Clarify-{clarify_id}] {subject}",
-            html=_to_html(questions_text),
-            reply_to=bot_email,
-            in_reply_to=parsed["message_id"] or None,
-        ), resend_key)
-        logger.info("Sent clarification request clarify_id=%s", clarify_id)
-        return
-
-    campaign_json = {"account_id": account_id, "campaigns": ingest_result.campaigns}
-
-    # --- Validate ---
-    meta = MetaClient(
-        app_id=env.get("FB_APP_ID") or os.environ["FB_APP_ID"],
-        app_secret=env.get("FB_APP_SECRET") or os.environ["FB_APP_SECRET"],
-        access_token=env.get("FB_ACCESS_TOKEN") or os.environ["FB_ACCESS_TOKEN"],
-        account_id=account_id,
+    _reply_client(body, attachment_bytes=seeded_bytes, attachment_filename="campaign_template.json")
+    logger.info(
+        "Seeded template returned to client from=%s campaigns=%d ambiguities=%d",
+        from_addr, len(ingest_result.campaigns), len(ingest_result.ambiguities),
     )
-    validation = validate_all(campaign_json, ai_client)
-    if not validation.is_pushable:
-        _reply_client(
-            "Your brief could not be processed due to policy or schema issues:\n\n"
-            + validation.summary()
-        )
-        return
-
-    # --- Plan ---
-    state = StateFile.load(account_id, state_dir=state_dir)
-    p = plan(campaign_json, state, meta)
-
-    # --- Save pending file ---
-    pending_id = uuid.uuid4().hex[:8]
-    pending_path = state_dir / f".pending_{pending_id}.json"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    pending_path.write_text(json.dumps({
-        "pending_id": pending_id,
-        "message_id": parsed["message_id"],
-        "client_from": from_addr,
-        "client_subject": subject,
-        "campaign_json": campaign_json,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }, indent=2), encoding="utf-8")
-
-    # --- Email operator ---
-    plan_text = _format_plan_text(p)
-    op_subject = f"[AdCode Review] {pending_id} | {subject}"
-    op_body = (
-        f"New campaign brief from: {from_addr}\n\n"
-        f"--- Plan ---\n{plan_text}\n\n"
-        f"Reply GO to apply or HOLD to discard."
-    )
-    send_email(EmailMessage(
-        from_=bot_email,
-        to=operator_email,
-        subject=op_subject,
-        html=_to_html(op_body),
-    ), resend_key)
-    logger.info("Sent plan to operator for pending_id=%s", pending_id)
-
-
-# ------------------------------------------------------------------
-# Clarification reply handler
-# ------------------------------------------------------------------
-
-async def _handle_clarification(parsed: dict, customer: dict, clarify_id: str):
-    from_addr = parsed["from"]
-    subject = parsed["subject"]
-    config_dir: Path = customer["_config_dir"]
-    env: dict = customer["_env"]
-    account_id: str = customer["account_id"]
-    state_dir = config_dir / customer.get("state_dir", "state")
-    bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
-    operator_email = customer.get("operator_email", "")
-    resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
-
-    ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
-        max_retries=6,
-    )
-
-    def _reply_client(body_text: str):
-        send_email(EmailMessage(
-            from_=bot_email,
-            to=_bare_email(from_addr),
-            subject=f"Re: {subject}",
-            html=_to_html(body_text),
-            reply_to=bot_email,
-            in_reply_to=parsed["message_id"] or None,
-        ), resend_key)
-
-    clarify_path = state_dir / f".clarifying_{clarify_id}.json"
-    if not clarify_path.exists():
-        logger.warning("No clarifying file for id=%s — treating as new brief", clarify_id)
-        await _handle_inbound(parsed, customer)
-        return
-
-    saved = json.loads(clarify_path.read_text(encoding="utf-8"))
-
-    # Apply answers to the saved draft
-    apply_prompt = _APPLY_CLARIFICATIONS.format(
-        campaigns_json=json.dumps(saved["campaigns"], indent=2),
-        questions=saved["questions"],
-        reply_body=parsed["body"],
-    )
-    response = ai_client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": apply_prompt}],
-    )
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```", 2)[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.rstrip("`").strip()
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.error("APPLY_CLARIFICATIONS returned non-JSON")
-        _reply_client("Sorry, we hit an issue processing your reply. Could you resend your answers?")
-        return
-
-    campaigns = result.get("campaigns", [])
-    ambiguities = result.get("ambiguities", [])
-
-    if ambiguities:
-        # Still gaps — ask again with a new clarify_id
-        from src.services.ingest import Ambiguity, IngestionResult
-        amb_objects = [
-            Ambiguity(
-                field=a.get("field", ""),
-                sheet=a.get("sheet", ""),
-                cell_ref=a.get("cell_ref", ""),
-                raw_value=str(a.get("raw_value", "")),
-                question=a.get("question", ""),
-            )
-            for a in ambiguities
-        ]
-        ambiguity_list = "\n".join(f"- {a.question}" for a in amb_objects)
-        consultant_prompt = AMBIGUITY_EMAIL.format(
-            subject=saved["client_subject"],
-            campaigns_json=json.dumps(campaigns, indent=2),
-            ambiguity_list=ambiguity_list,
-        )
-        amb_response = ai_client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": consultant_prompt}],
-        )
-        questions_text = amb_response.content[0].text.strip()
-
-        new_clarify_id = uuid.uuid4().hex[:8]
-        new_clarify_path = state_dir / f".clarifying_{new_clarify_id}.json"
-        new_clarify_path.write_text(json.dumps({
-            "clarify_id": new_clarify_id,
-            "client_from": from_addr,
-            "client_subject": saved["client_subject"],
-            "campaigns": campaigns,
-            "questions": questions_text,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }, indent=2), encoding="utf-8")
-
-        send_email(EmailMessage(
-            from_=bot_email,
-            to=_bare_email(from_addr),
-            subject=f"Re: [Clarify-{new_clarify_id}] {saved['client_subject']}",
-            html=_to_html(questions_text),
-            reply_to=bot_email,
-            in_reply_to=parsed["message_id"] or None,
-        ), resend_key)
-        clarify_path.unlink()
-        logger.info("Follow-up clarification new_clarify_id=%s", new_clarify_id)
-        return
-
-    # All clear — proceed to validate → plan → operator
-    clarify_path.unlink()
-    campaign_json = {"account_id": account_id, "campaigns": campaigns}
-
-    meta = MetaClient(
-        app_id=env.get("FB_APP_ID") or os.environ["FB_APP_ID"],
-        app_secret=env.get("FB_APP_SECRET") or os.environ["FB_APP_SECRET"],
-        access_token=env.get("FB_ACCESS_TOKEN") or os.environ["FB_ACCESS_TOKEN"],
-        account_id=account_id,
-    )
-    from src.services.validate import validate_all
-    validation = validate_all(campaign_json, ai_client)
-    if not validation.is_pushable:
-        _reply_client(
-            "Your brief could not be processed due to policy or schema issues:\n\n"
-            + validation.summary()
-        )
-        return
-
-    state = StateFile.load(account_id, state_dir=state_dir)
-    p = plan(campaign_json, state, meta)
-
-    pending_id = uuid.uuid4().hex[:8]
-    pending_path = state_dir / f".pending_{pending_id}.json"
-    pending_path.write_text(json.dumps({
-        "pending_id": pending_id,
-        "message_id": parsed["message_id"],
-        "client_from": from_addr,
-        "client_subject": saved["client_subject"],
-        "campaign_json": campaign_json,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }, indent=2), encoding="utf-8")
-
-    plan_text = _format_plan_text(p)
-    op_subject = f"[AdCode Review] {pending_id} | {saved['client_subject']}"
-    op_body = (
-        f"New campaign brief from: {from_addr}\n\n"
-        f"--- Plan ---\n{plan_text}\n\n"
-        f"Reply GO to apply or HOLD to discard."
-    )
-    send_email(EmailMessage(
-        from_=bot_email,
-        to=operator_email,
-        subject=op_subject,
-        html=_to_html(op_body),
-    ), resend_key)
-    logger.info("Clarification resolved — sent plan to operator pending_id=%s", pending_id)
-
-
-# ------------------------------------------------------------------
-# Operator reply handler — GO / HOLD
-# ------------------------------------------------------------------
-
-async def _handle_operator_reply(parsed: dict, customer: dict):
-    subject = parsed["subject"]
-    body_upper = parsed["body"].strip().upper()
-    config_dir: Path = customer["_config_dir"]
-    env: dict = customer["_env"]
-    account_id: str = customer["account_id"]
-    state_dir = config_dir / customer.get("state_dir", "state")
-    bot_email = customer.get("bot_email", "traffic@ryanbishop.me")
-    resend_key = env.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
-
-    # Extract pending_id from subject: "[AdCode Review] {pending_id} | ..."
-    try:
-        pending_id = subject.split("[AdCode Review]")[1].split("|")[0].strip()
-    except (IndexError, ValueError):
-        logger.warning("Operator reply missing pending_id in subject: %r", subject)
-        return
-
-    pending_path = state_dir / f".pending_{pending_id}.json"
-    if not pending_path.exists():
-        logger.warning("No pending file for id=%s", pending_id)
-        return
-
-    pending = json.loads(pending_path.read_text(encoding="utf-8"))
-    client_from = pending["client_from"]
-    client_subject = pending["client_subject"]
-    campaign_json = pending["campaign_json"]
-
-    def _reply_client(body_text: str):
-        send_email(EmailMessage(
-            from_=bot_email,
-            to=_bare_email(client_from),
-            subject=f"Re: {client_subject}",
-            html=_to_html(body_text),
-            in_reply_to=pending.get("message_id") or None,
-        ), resend_key)
-
-    is_go = "GO" in body_upper
-    is_hold = "HOLD" in body_upper
-
-    if not is_go and not is_hold:
-        logger.warning("Operator reply contained neither GO nor HOLD: %r", parsed["body"][:100])
-        return
-
-    if is_hold:
-        _reply_client(
-            "Your campaign brief is currently on hold. "
-            "We'll be in touch if we have questions."
-        )
-        pending_path.unlink()
-        logger.info("HOLD — discarded pending_id=%s", pending_id)
-        return
-
-    # GO — apply
-    meta = MetaClient(
-        app_id=env.get("FB_APP_ID") or os.environ["FB_APP_ID"],
-        app_secret=env.get("FB_APP_SECRET") or os.environ["FB_APP_SECRET"],
-        access_token=env.get("FB_ACCESS_TOKEN") or os.environ["FB_ACCESS_TOKEN"],
-        account_id=account_id,
-    )
-    ai_client = anthropic.Anthropic(
-        api_key=env.get("ANTHROPIC_API_KEY") or os.environ["ANTHROPIC_API_KEY"],
-        max_retries=6,
-    )
-
-    state = StateFile.load(account_id, state_dir=state_dir)
-    p = plan(campaign_json, state, meta)
-    result = apply_plan(p, meta, state, campaign_json=campaign_json)
-
-    _reply_client(
-        f"Your campaigns have been applied to Facebook.\n\nSummary: {result.summary()}"
-    )
-    pending_path.unlink()
-    logger.info("GO — applied pending_id=%s result=%s", pending_id, result.summary())
 
 
 # ------------------------------------------------------------------
@@ -639,23 +302,13 @@ async def inbound_webhook(request: Request):
         return {"status": "rejected", "reason": "unknown sender"}
 
     parsed = _parse_raw_email(raw)
-    bare_from = _bare_email(from_addr)
-    operator_email = customer.get("operator_email", "").lower()
 
     # Ensure parsed["from"] is never empty — fall back to the webhook envelope address
     if not parsed["from"]:
         parsed["from"] = from_addr
 
-    subj = parsed["subject"]
-    clarify_match = re.search(r"\[Clarify-([a-f0-9]{8})\]", subj)
-
     try:
-        if bare_from == operator_email and "[AdCode Review]" in subj:
-            await _handle_operator_reply(parsed, customer)
-        elif clarify_match:
-            await _handle_clarification(parsed, customer, clarify_match.group(1))
-        else:
-            await _handle_inbound(parsed, customer)
+        await _handle_inbound(parsed, customer)
     except APIStatusError as exc:
         if exc.status_code == 529:
             logger.warning("Anthropic overloaded — returning 200 to avoid Worker rejection")
@@ -667,7 +320,11 @@ async def inbound_webhook(request: Request):
                         from_=bot_email,
                         to=_bare_email(parsed["from"]),
                         subject=f"Re: {parsed.get('subject', '')}",
-                        html="We received your email but hit a temporary capacity issue on our end. Please resend in a few minutes and we'll pick it up right away. Sorry for the inconvenience.",
+                        html=(
+                            "We received your email but hit a temporary capacity issue on our end. "
+                            "Please resend in a few minutes and we'll pick it up right away. "
+                            "Sorry for the inconvenience."
+                        ),
                     ), resend_key)
                 except Exception:
                     logger.exception("Failed to send overload notice")

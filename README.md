@@ -6,28 +6,62 @@ Git history is the audit trail. Pull requests are the review mechanism. No one n
 
 ## Service model
 
-AdCode is designed to be operated as a **contractor service**, not a SaaS product. The operator provides an email address; clients send media plans; campaigns get pushed; confirmations come back. The client never interacts with the MCP server or Facebook API directly.
+AdCode is a contractor trafficking service. The operator receives campaign templates from clients, runs the engine locally, and pushes changes to Facebook. Clients never interact with the MCP server or the Facebook API directly.
 
-This maps onto how agencies already buy ad trafficking — as a contractor engagement, not a software subscription. No procurement friction, no seat licenses, no client onboarding beyond "send us your brief."
+This maps onto how agencies already buy ad trafficking — as a contractor engagement, not a software subscription. The operator's value is speed, accuracy, and a Git-backed audit trail of every change ever made.
 
-The operator is the human in the loop. Every push goes through a plan-review step before `apply_campaigns` runs. The operator approves the plan; the software executes it. See ADR-008 for the full design rationale.
+**Why use AdCode over a manual trafficker:**
+- Changes are applied from a versioned template — every push is a Git commit; any change can be explained or reverted
+- Machine-applied changes are faster and more accurate than hand-entry in Ads Manager
+- The operator accepts templates, not ad hoc instructions — submissions are structured and reviewable
 
-## Email bot
+See ADR-008 for the contractor service model design.
 
-Clients interact with AdCode entirely by email — no logins, no dashboards.
+## Email bot (template mailroom)
+
+Clients submit campaign templates by email. The email bot on Fly.io validates the submission and routes it — it does not connect to Facebook or run the engine.
 
 ```
-Client → traffic@ryanbishop.me → Cloudflare Email Worker
-  → api.ryanbishop.me/inbound (Fly.io)
-  → Claude extracts campaign JSON
-  → Operator receives plan email
-  → Operator replies GO → apply → client confirmation
-                    HOLD → client notified, brief discarded
+Client emails template (.json) or Excel brief
+  → Cloudflare Email Worker → api.ryanbishop.me/inbound (Fly.io)
+
+Path 1 — Valid AdCode template:
+  → Reply to client: "Request received and submitted"
+  → Forward template to operator
+
+Path 2 — JSON with schema errors:
+  → Reply to client with specific errors and how to fix them
+  → (Client fixes template and resubmits)
+
+Path 3 — Dirty Excel or plain text:
+  → Seed a starter template using AI
+  → Reply to client with template attached
+  → (Client reviews, fills in gaps, resubmits)
 ```
 
-Attach an Excel brief or write the campaign description in plain text. The AI extracts campaign definitions, validates against Facebook policy, and generates a plan. If anything is ambiguous, the client gets a list of questions before the plan is generated.
+The email bot holds no Facebook credentials and no state files. See ADR-010 for the full design rationale.
 
-The email bot runs as a FastAPI service on Fly.io. See ADR-009 for architecture decisions and `docs/email-worker-runbook.md` for operational procedures.
+## Operator workflow
+
+After receiving a forwarded template, the operator applies it locally:
+
+```bash
+# 1. Save the template to the customer's campaigns directory
+#    (copy attachment from email to customers/<slug>/campaigns/)
+
+# 2. Start the MCP server scoped to that customer
+python src/mcp_server.py --config customers/<slug>/config.json
+
+# 3. Use your AI client (Claude, Gemini, Cursor) to plan and apply:
+#    "Plan the template at customers/acme/campaigns/q1.json"
+#    "Apply it"
+
+# — or run the CLI directly —
+python src/traffic.py customers/<slug>/campaigns/<file>.json --dry-run
+python src/traffic.py customers/<slug>/campaigns/<file>.json
+```
+
+The state file is updated after each apply and committed to Git. The Git history is the audit trail.
 
 ## How it works
 
@@ -246,28 +280,26 @@ Integration tests are skipped automatically when credentials are absent.
 
 ### Manual smoke tests (CLI)
 
-Validate a campaign file against schema and AI policy checks:
+Plan (dry-run) a campaign file — shows what would change without calling the API:
 
 ```bash
-python -c "
-import json, anthropic, os
-from dotenv import load_dotenv
-from src.services.validate import validate_all
-load_dotenv()
-data = json.load(open('campaigns/example.json'))
-result = validate_all(data, anthropic.Anthropic())
-print(result.summary())
-"
+python src/traffic.py customers/<slug>/campaigns/<file>.json --dry-run
 ```
 
-Dry-run the apply engine to see what would change without calling the API:
+Apply a campaign file to Facebook:
 
 ```bash
-python src/traffic.py campaigns/example.json --dry-run
+python src/traffic.py customers/<slug>/campaigns/<file>.json
 ```
 
-Ingest an Excel brief into campaign JSON:
+Run a drift report for an account:
 
 ```bash
-python -m src.services.ingest my_brief.xlsx --output campaigns/output.json
+python src/reconcile.py <account_id>
+```
+
+Seed a campaign template from an Excel brief:
+
+```bash
+python -m src.services.ingest my_brief.xlsx --output customers/<slug>/campaigns/output.json
 ```

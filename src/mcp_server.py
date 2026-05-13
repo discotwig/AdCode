@@ -584,6 +584,28 @@ def _load_customer_config(config_path: str) -> None:
     logger.info("Loaded customer config: slug=%s account=%s", config.get("customer_slug"), config.get("account_id"))
 
 
+def _check_facebook_connection() -> bool:
+    """Attempt a lightweight Facebook API call to verify credentials.
+
+    Returns True on success. Logs the error and returns False on failure.
+    Pass --skip-connection-check to bypass (useful for offline/test use).
+    """
+    try:
+        meta = _get_meta_client()
+        account_id = os.environ.get("FB_ACCOUNT_ID", "")
+        meta.list_campaigns(account_id)
+        logger.info("Facebook connection verified for account=%s", account_id)
+        return True
+    except Exception as exc:
+        logger.error(
+            "Facebook connection check failed: %s — "
+            "verify FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, and FB_ACCOUNT_ID in your .env. "
+            "Pass --skip-connection-check to start anyway.",
+            exc,
+        )
+        return False
+
+
 async def _main():
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
@@ -591,10 +613,16 @@ async def _main():
 
 def main():
     import asyncio
+    skip_check = "--skip-connection-check" in sys.argv
+
     if "--config" in sys.argv:
         idx = sys.argv.index("--config")
         if idx + 1 < len(sys.argv):
             _load_customer_config(sys.argv[idx + 1])
+        if not skip_check:
+            if not _check_facebook_connection():
+                raise SystemExit(1)
+
     asyncio.run(_main())
 
 
