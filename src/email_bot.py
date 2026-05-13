@@ -44,7 +44,10 @@ import markdown as markdown_lib
 from src.services.email import send_email, EmailMessage
 from src.services.ingest import read_excel, extract_campaigns
 from src.services.brief import extract_from_text
-from src.traffic import _CAMPAIGN_SCHEMA
+
+_SCHEMA_PATH = _REPO_ROOT / "schemas" / "campaign.schema.json"
+with open(_SCHEMA_PATH) as _schema_f:
+    _CAMPAIGN_SCHEMA = json.load(_schema_f)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
