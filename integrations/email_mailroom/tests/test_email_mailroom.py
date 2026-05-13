@@ -1,4 +1,4 @@
-"""Tests for src/email_bot.py — mailroom mode, sender-agnostic.
+"""Tests for integrations/email_mailroom/app.py — mailroom mode, sender-agnostic.
 
 All external calls (Resend, Anthropic, ingest) are mocked.
 Global env vars (OPERATOR_EMAIL, BOT_EMAIL, etc.) are patched per test.
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.email_bot import app, _bare_email, _parse_raw_email, ACCOUNT_ID_PLACEHOLDER
+from integrations.email_mailroom.app import app, _bare_email, _parse_raw_email, ACCOUNT_ID_PLACEHOLDER
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +71,10 @@ def _post(client: TestClient, raw: str, from_addr="anyone@example.com") -> dict:
 # ---------------------------------------------------------------------------
 
 ENV_PATCH = {
-    "src.email_bot.OPERATOR_EMAIL": "operator@example.com",
-    "src.email_bot.BOT_EMAIL": "traffic@ryanbishop.me",
-    "src.email_bot.RESEND_API_KEY": "re_test_key",
-    "src.email_bot.ANTHROPIC_API_KEY": "anth_test_key",
+    "integrations.email_mailroom.app.OPERATOR_EMAIL": "operator@example.com",
+    "integrations.email_mailroom.app.BOT_EMAIL": "traffic@ryanbishop.me",
+    "integrations.email_mailroom.app.RESEND_API_KEY": "re_test_key",
+    "integrations.email_mailroom.app.ANTHROPIC_API_KEY": "anth_test_key",
 }
 
 
@@ -166,7 +166,7 @@ def test_account_id_placeholder_format():
 
 class TestAnySenderAccepted:
     def test_unknown_sender_returns_ok(self):
-        with patch("src.email_bot.send_email"):
+        with patch("integrations.email_mailroom.app.send_email"):
             patches = _env_patches()
             for p in patches:
                 p.start()
@@ -181,7 +181,7 @@ class TestAnySenderAccepted:
     def test_any_email_address_is_processed(self):
         """The bot does not maintain an allowlist — all senders are handled."""
         sent = []
-        with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+        with patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
             patches = _env_patches()
             for p in patches:
                 p.start()
@@ -205,7 +205,7 @@ class TestPath1ValidTemplate:
         for p in patches:
             p.start()
         try:
-            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            with patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
                 with TestClient(app) as client:
                     result = _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE, from_addr=from_addr))
         finally:
@@ -238,13 +238,20 @@ class TestPath1ValidTemplate:
         _, sent = self._run()
         assert "[AdCode]" in sent[1].subject
 
+    def test_operator_email_uses_stack_folder_instructions(self):
+        _, sent = self._run()
+        html = sent[1].html
+        assert "customers/&lt;slug&gt;/&lt;stack-name&gt;/&lt;stack-name&gt;_template.json" in html
+        assert "--config customers/&lt;slug&gt;/&lt;stack-name&gt;/&lt;stack-name&gt;_template.json" in html
+        assert "config.json" not in html
+
     def test_no_operator_email_when_operator_not_configured(self):
         sent = []
-        patches = _env_patches() + [patch("src.email_bot.OPERATOR_EMAIL", "")]
+        patches = _env_patches() + [patch("integrations.email_mailroom.app.OPERATOR_EMAIL", "")]
         for p in patches:
             p.start()
         try:
-            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            with patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
                 with TestClient(app) as client:
                     _post(client, _make_raw_with_json_attachment(VALID_TEMPLATE))
         finally:
@@ -264,7 +271,7 @@ class TestPath2InvalidTemplate:
         for p in patches:
             p.start()
         try:
-            with patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            with patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
                 with TestClient(app) as client:
                     result = _post(client, _make_raw_with_json_attachment(INVALID_TEMPLATE))
         finally:
@@ -308,10 +315,10 @@ class TestPath3Seeding:
         for p in patches:
             p.start()
         try:
-            with patch("src.email_bot.read_excel", return_value={}), \
-                 patch("src.email_bot.extract_campaigns", return_value=self._mock_ingest_result()), \
-                 patch("src.email_bot.anthropic.Anthropic"), \
-                 patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            with patch("integrations.email_mailroom.app.read_excel", return_value={}), \
+                 patch("integrations.email_mailroom.app.extract_campaigns", return_value=self._mock_ingest_result()), \
+                 patch("integrations.email_mailroom.app.anthropic.Anthropic"), \
+                 patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
                 with TestClient(app) as client:
                     result = _post(client, _make_raw_with_xlsx_attachment(b"fakexlsx"))
         finally:
@@ -353,9 +360,9 @@ class TestPath3Seeding:
         for p in patches:
             p.start()
         try:
-            with patch("src.email_bot.extract_from_text", return_value=ingest_result), \
-                 patch("src.email_bot.anthropic.Anthropic"), \
-                 patch("src.email_bot.send_email", side_effect=lambda msg, key: sent.append(msg)):
+            with patch("integrations.email_mailroom.app.extract_from_text", return_value=ingest_result), \
+                 patch("integrations.email_mailroom.app.anthropic.Anthropic"), \
+                 patch("integrations.email_mailroom.app.send_email", side_effect=lambda msg, key: sent.append(msg)):
                 with TestClient(app) as client:
                     _post(client, _make_raw_plain(body="Create a brand awareness campaign."))
         finally:
@@ -375,3 +382,4 @@ def test_health_returns_ok():
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+

@@ -1,4 +1,4 @@
-"""Email bot webhook server — mailroom mode.
+"""Email mailroom webhook server.
 
 Receives inbound emails forwarded by the Cloudflare Email Worker.
 Validates submissions and routes them:
@@ -19,7 +19,7 @@ All settings come from environment variables.
 Engine (plan/apply) runs on the operator's local machine.
 
 Start:
-    uvicorn src.email_bot:app --host 0.0.0.0 --port 8080
+    uvicorn integrations.email_mailroom.app:app --host 0.0.0.0 --port 8080
 """
 import email as email_lib
 import json
@@ -29,7 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -41,9 +41,9 @@ from fastapi import FastAPI, Request, HTTPException
 
 import markdown as markdown_lib
 
-from src.services.email import send_email, EmailMessage
+from integrations.email_mailroom.email import send_email, EmailMessage
+from integrations.email_mailroom.brief import extract_from_text
 from src.services.ingest import read_excel, extract_campaigns
-from src.services.brief import extract_from_text
 
 _SCHEMA_PATH = _REPO_ROOT / "schemas" / "campaign.schema.json"
 with open(_SCHEMA_PATH) as _schema_f:
@@ -188,8 +188,8 @@ async def _handle_inbound(parsed: dict):
                         f"From: {from_addr}\n"
                         f"Subject: {subject}\n\n"
                         f"The validated template is attached. "
-                        f"Save it to `customers/<slug>/campaigns/` and run:\n\n"
-                        f"```\npython src/mcp_server.py --config customers/<slug>/config.json\n```"
+                        f"Save it to `customers/<slug>/<stack-name>/<stack-name>_template.json` and run:\n\n"
+                        f"```\npython src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json\n```"
                     ),
                     attachment_bytes=parsed["json_bytes"],
                     attachment_filename=parsed["json_filename"] or "campaign.json",

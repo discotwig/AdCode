@@ -65,8 +65,8 @@ Git commit of template + state
 | Provider client | `src/api/meta.py` | Wraps the Facebook Business SDK. |
 | Drift detection | `src/reconcile.py` | Compares stack state to live Facebook actuals. |
 | Validation | `src/services/validate.py` | Combines schema validation with AI policy review. |
-| Ingestion | `src/services/ingest.py`, `src/services/brief.py` | Converts Excel and plain-text briefs into campaign JSON. |
-| Email mailroom | `src/email_bot.py`, `src/workers/inbound.js` | Client-facing intake and routing; no Facebook credentials. |
+| Ingestion | `src/services/ingest.py` | Converts Excel briefs into campaign JSON. Plain-text email extraction lives in the email mailroom integration. |
+| Email mailroom | `integrations/email_mailroom/` | Optional client-facing intake and routing; no Facebook credentials. |
 
 ## Stack Isolation
 

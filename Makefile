@@ -1,7 +1,7 @@
 .PHONY: test validate-example smoke
 
 test:
-	pytest tests/
+	pytest
 
 validate-example:
 	python scripts/validate_example.py

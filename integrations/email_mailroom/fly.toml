@@ -7,14 +7,10 @@ app = 'adcode'
 primary_region = 'iad'
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = 'integrations/email_mailroom/Dockerfile'
 
 [env]
   PORT = '8080'
-
-[[mounts]]
-  source = 'adcode_data'
-  destination = '/app/customers'
 
 [http_service]
   internal_port = 8080

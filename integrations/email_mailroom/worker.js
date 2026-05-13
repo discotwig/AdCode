@@ -6,7 +6,7 @@
  *   WEBHOOK_URL    — e.g. https://api.ryanbishop.me/inbound
  *   WEBHOOK_SECRET — shared secret checked by the Python server
  *
- * Deploy: wrangler deploy src/workers/inbound.js
+ * Deploy: wrangler deploy integrations/email_mailroom/worker.js
  */
 export default {
   async email(message, env, ctx) {

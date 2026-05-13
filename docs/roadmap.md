@@ -7,7 +7,7 @@ AdCode is alpha infrastructure tooling. The core Meta plan/apply/state workflow 
 - Improve first-run examples and docs.
 - Keep the local stack workflow simple and explicit.
 - Expand tests around state, drift, deletes, and renames.
-- Keep the hosted email bot as a mailroom only.
+- Keep the hosted email mailroom as an optional integration only.
 - Gather real agency workflow feedback.
 
 ## Next

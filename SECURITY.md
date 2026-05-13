@@ -25,7 +25,7 @@ customers/<slug>/<stack-name>/.env
 
 Do not commit `.env` files. The repository `.gitignore` excludes stack credential files.
 
-The hosted email mailroom does not need Facebook credentials and should not be given them. It only needs:
+The optional email mailroom in `integrations/email_mailroom/` does not need Facebook credentials and should not be given them. It only needs:
 
 - `WEBHOOK_SECRET`
 - `OPERATOR_EMAIL`

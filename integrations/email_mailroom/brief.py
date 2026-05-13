@@ -2,12 +2,12 @@ import json
 import logging
 from pathlib import Path
 
-from src.prompts import BRIEF_EXTRACT
+from integrations.email_mailroom.prompts import BRIEF_EXTRACT
 from src.services.ingest import IngestionResult, Ambiguity
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_PATH = Path(__file__).parent.parent.parent / "schemas" / "campaign.schema.json"
+_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schemas" / "campaign.schema.json"
 
 
 def extract_from_text(body: str, ai_client) -> IngestionResult:

@@ -10,7 +10,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 | [005](005-import-untracked-adsets.md) | `import_adsets` adopts live Facebook ad sets into template and state. |
 | [006](006-facebook-pull-fidelity.md) | Preserve Facebook-returned values carefully when pulling live data. |
 | [008](008-contractor-service-model.md) | V1 commercial and operational model is a contractor service, not SaaS. |
-| [010](010-mailroom-engine-split.md) | Hosted email bot is a mailroom; execution runs locally. |
+| [010](010-mailroom-engine-split.md) | Hosted email bot is a mailroom integration; execution runs locally. |
 | [011](011-agnostic-email-bot.md) | Email bot accepts any sender with a valid webhook secret. |
 | [012](012-ad-stack-model.md) | State is stack-scoped, not account-scoped. |
 | [013](013-terraform-stack-layout.md) | Stack folder co-locates template and state. |

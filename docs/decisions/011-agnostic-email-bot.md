@@ -62,7 +62,7 @@ When the bot seeds a starter template from a dirty Excel or plain-text brief, th
 
 | File | Change |
 | --- | --- |
-| `src/email_bot.py` | Removed `_load_all_configs`, `_find_customer`, `CUSTOMERS_DIR`; added `OPERATOR_EMAIL`/`BOT_EMAIL` module constants; removed unknown-sender rejection block |
+| `integrations/email_mailroom/app.py` | Removed `_load_all_configs`, `_find_customer`, `CUSTOMERS_DIR`; added `OPERATOR_EMAIL`/`BOT_EMAIL` module constants; removed unknown-sender rejection block |
 | `customers/demo/config.json` | Removed `email_addresses`, `operator_email`, `bot_email` |
 | `schemas/customer_config.schema.json` | Removed `email_addresses`, `operator_email`, `bot_email` |
-| `tests/test_email_bot.py` | Removed `DEMO_CONFIG`, `TestUnknownSenderRejected`, `_find_customer` tests; mocks patch global env vars; added `TestAnySenderAccepted` |
+| `integrations/email_mailroom/tests/test_email_mailroom.py` | Removed `DEMO_CONFIG`, `TestUnknownSenderRejected`, `_find_customer` tests; mocks patch global env vars; added `TestAnySenderAccepted` |

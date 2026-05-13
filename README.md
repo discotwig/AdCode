@@ -220,18 +220,18 @@ src/
   services/state.py
   services/validate.py
   services/ingest.py
-  services/brief.py
   traffic.py
   reconcile.py
   mcp_server.py
-  email_bot.py
+integrations/
+  email_mailroom/
 tests/
 docs/
 ```
 
-## Email Mailroom
+## Optional: Email Intake
 
-Clients can submit templates or briefs by email. The Cloudflare Email Worker forwards raw mail to the FastAPI bot on Fly.io.
+The email mailroom is an optional integration for service operators who receive templates or briefs by email. It lives in [integrations/email_mailroom](integrations/email_mailroom/README.md).
 
 ```text
 Client email
@@ -253,12 +253,14 @@ The mailroom is sender-agnostic. Any email that arrives with the shared webhook 
 - `ANTHROPIC_API_KEY`
 - `WEBHOOK_SECRET`
 
+The mailroom does not hold Facebook credentials, run plan/apply, or store stack state.
+
 ## Running Tests
 
 Unit tests use mocks and do not require Facebook credentials:
 
 ```bash
-pytest tests/
+pytest
 ```
 
 Integration tests require a Meta developer app, a test ad account, and valid credentials:

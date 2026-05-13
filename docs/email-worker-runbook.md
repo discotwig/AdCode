@@ -1,7 +1,8 @@
 # Cloudflare Email Worker — Runbook
 
 Worker name: `adcode-inbound`  
-Source file: `src/workers/inbound.js`  
+Source file: `integrations/email_mailroom/worker.js`  
+Integration docs: `integrations/email_mailroom/README.md`  
 Receives: inbound email at `traffic@ryanbishop.me`  
 Forwards to: `https://api.ryanbishop.me/inbound`
 
@@ -9,11 +10,11 @@ Forwards to: `https://api.ryanbishop.me/inbound`
 
 ## Update the worker code
 
-When `src/workers/inbound.js` changes:
+When `integrations/email_mailroom/worker.js` changes:
 
 1. Go to **dash.cloudflare.com** → **Workers & Pages** → `adcode-inbound`
 2. Click **Edit code**
-3. Replace all code with the contents of `src/workers/inbound.js`
+3. Replace all code with the contents of `integrations/email_mailroom/worker.js`
 4. Click **Deploy**
 
 ---

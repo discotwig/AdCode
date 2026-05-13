@@ -1,5 +1,5 @@
-# Dependencies for the Fly.io email bot (mailroom only).
-# Excludes facebook-business and mcp — the engine does not run on Fly.io.
+# Dependencies for the Fly.io email mailroom only.
+# Excludes facebook-business and mcp; the engine does not run on Fly.io.
 openpyxl>=3.1.0
 jsonschema>=4.23.0
 python-dotenv>=1.0.0
