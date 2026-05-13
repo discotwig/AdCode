@@ -3,7 +3,7 @@
   "campaigns": [
     {
       "fb_id": "120244515578050719",
-      "name": "AdCode Demo Traffic May 13",
+      "name": "march_campaign_adcode_demo_traffic_may_13_2026_updated",
       "objective": "OUTCOME_TRAFFIC",
       "status": "PAUSED",
       "special_ad_categories": [],
@@ -20,9 +20,14 @@
             "age_min": 25,
             "age_max": 44,
             "geo_locations": {
-              "countries": ["US"]
+              "countries": [
+                "US"
+              ]
             },
-            "publisher_platforms": ["facebook", "instagram"],
+            "publisher_platforms": [
+              "facebook",
+              "instagram"
+            ],
             "targeting_automation": {
               "advantage_audience": 0
             }
@@ -57,7 +62,7 @@
     },
     {
       "fb_id": "23848811639550718",
-      "name": "My campaign 1017",
+      "name": "march_campaign_my_campaign_1017",
       "objective": "LINK_CLICKS",
       "status": "PAUSED",
       "special_ad_categories": [],
@@ -77,8 +82,12 @@
             "age_max": 65,
             "age_min": 18,
             "geo_locations": {
-              "countries": ["US"],
-              "location_types": ["home"]
+              "countries": [
+                "US"
+              ],
+              "location_types": [
+                "home"
+              ]
             }
           }
         }
@@ -86,7 +95,7 @@
     },
     {
       "fb_id": "23845817703660718",
-      "name": "Test API Campaign 1",
+      "name": "march_campaign_test_api_campaign_1",
       "objective": "PAGE_LIKES",
       "status": "PAUSED",
       "special_ad_categories": [],
@@ -107,16 +116,54 @@
             "age_max": 65,
             "age_min": 18,
             "geo_locations": {
-              "countries": ["US"],
-              "location_types": ["home"]
+              "countries": [
+                "US"
+              ],
+              "location_types": [
+                "home"
+              ]
             }
           }
         }
       ]
     },
     {
+      "name": "march_campaign_test_api_campaign_1_new",
+      "objective": "OUTCOME_ENGAGEMENT",
+      "status": "PAUSED",
+      "special_ad_categories": [],
+      "ad_sets": [
+        {
+          "name": "Test API AdSet 1",
+          "status": "PAUSED",
+          "ads": [],
+          "lifetime_budget": 5000,
+          "billing_event": "IMPRESSIONS",
+          "optimization_goal": "PAGE_LIKES",
+          "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
+          "bid_amount": 1000,
+          "start_time": "2026-05-14T09:00:00-0400",
+          "end_time": "2026-06-14T09:00:00-0400",
+          "targeting": {
+            "age_max": 65,
+            "age_min": 18,
+            "geo_locations": {
+              "countries": [
+                "US"
+              ],
+              "location_types": [
+                "home"
+              ]
+            }
+          },
+          "fb_id": "120244694843790719"
+        }
+      ],
+      "fb_id": "120244694769090719"
+    },
+    {
       "fb_id": "23845815648120718",
-      "name": "Atlanta Debut",
+      "name": "march_campaign_atlanta_debut",
       "objective": "REACH",
       "status": "PAUSED",
       "special_ad_categories": [],
@@ -198,11 +245,20 @@
               }
             ],
             "geo_locations": {
-              "countries": ["US"],
-              "location_types": ["home", "recent"]
+              "countries": [
+                "US"
+              ],
+              "location_types": [
+                "home",
+                "recent"
+              ]
             },
-            "brand_safety_content_filter_levels": ["FACEBOOK_STANDARD"],
-            "publisher_platforms": ["facebook"],
+            "brand_safety_content_filter_levels": [
+              "FACEBOOK_STANDARD"
+            ],
+            "publisher_platforms": [
+              "facebook"
+            ],
             "facebook_positions": [
               "feed",
               "video_feeds",
@@ -212,7 +268,10 @@
               "story",
               "search"
             ],
-            "device_platforms": ["mobile", "desktop"]
+            "device_platforms": [
+              "mobile",
+              "desktop"
+            ]
           }
         }
       ]

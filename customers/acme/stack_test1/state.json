@@ -1,11 +1,11 @@
 {
   "account_id": "act_366643171197739",
-  "last_pushed_at": "2026-05-12T03:55:30.270960+00:00",
+  "last_pushed_at": "2026-05-13T19:50:25.628944+00:00",
   "campaigns": {
-    "AdCode Demo \u2014 Brand Awareness": {
+    "march_campaign_adcode_demo_traffic_may_13_2026_updated": {
       "fb_id": "120244515578050719",
       "params": {
-        "name": "AdCode Demo \u2014 Brand Awareness",
+        "name": "march_campaign_adcode_demo_traffic_may_13_2026_updated",
         "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
         "special_ad_categories": []
@@ -50,10 +50,10 @@
         }
       }
     },
-    "My campaign 1017": {
+    "march_campaign_my_campaign_1017": {
       "fb_id": "23848811639550718",
       "params": {
-        "name": "My campaign 1017",
+        "name": "march_campaign_my_campaign_1017",
         "objective": "LINK_CLICKS",
         "status": "PAUSED",
         "special_ad_categories": []
@@ -87,48 +87,10 @@
         }
       }
     },
-    "Test API Campaign 1": {
-      "fb_id": "23845817703660718",
-      "params": {
-        "name": "Test API Campaign 1",
-        "objective": "PAGE_LIKES",
-        "status": "PAUSED",
-        "special_ad_categories": []
-      },
-      "ad_sets": {
-        "Test API AdSet 1": {
-          "fb_id": "23845817916220718",
-          "params": {
-            "name": "Test API AdSet 1",
-            "status": "PAUSED",
-            "lifetime_budget": 3000,
-            "billing_event": "IMPRESSIONS",
-            "optimization_goal": "PAGE_LIKES",
-            "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
-            "bid_amount": 1000,
-            "start_time": "2020-09-16T20:18:29-0400",
-            "end_time": "2020-09-26T16:18:29-0400",
-            "targeting": {
-              "age_max": 65,
-              "age_min": 18,
-              "geo_locations": {
-                "countries": [
-                  "US"
-                ],
-                "location_types": [
-                  "home"
-                ]
-              }
-            }
-          },
-          "ads": {}
-        }
-      }
-    },
-    "Atlanta Debut": {
+    "march_campaign_atlanta_debut": {
       "fb_id": "23845815648120718",
       "params": {
-        "name": "Atlanta Debut",
+        "name": "march_campaign_atlanta_debut",
         "objective": "REACH",
         "status": "PAUSED",
         "special_ad_categories": []
@@ -238,6 +200,82 @@
                 "mobile",
                 "desktop"
               ]
+            }
+          },
+          "ads": {}
+        }
+      }
+    },
+    "march_campaign_test_api_campaign_1": {
+      "fb_id": "23845817703660718",
+      "params": {
+        "name": "march_campaign_test_api_campaign_1",
+        "objective": "PAGE_LIKES",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {
+        "Test API AdSet 1": {
+          "fb_id": "23845817916220718",
+          "params": {
+            "name": "Test API AdSet 1",
+            "status": "PAUSED",
+            "lifetime_budget": 3000,
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": "PAGE_LIKES",
+            "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
+            "bid_amount": 1000,
+            "start_time": "2020-09-16T20:18:29-0400",
+            "end_time": "2020-09-26T16:18:29-0400",
+            "targeting": {
+              "age_max": 65,
+              "age_min": 18,
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ],
+                "location_types": [
+                  "home"
+                ]
+              }
+            }
+          },
+          "ads": {}
+        }
+      }
+    },
+    "march_campaign_test_api_campaign_1_new": {
+      "fb_id": "120244694769090719",
+      "params": {
+        "name": "march_campaign_test_api_campaign_1_new",
+        "objective": "OUTCOME_ENGAGEMENT",
+        "status": "PAUSED",
+        "special_ad_categories": []
+      },
+      "ad_sets": {
+        "Test API AdSet 1": {
+          "fb_id": "120244694843790719",
+          "params": {
+            "name": "Test API AdSet 1",
+            "status": "PAUSED",
+            "lifetime_budget": 5000,
+            "billing_event": "IMPRESSIONS",
+            "optimization_goal": "PAGE_LIKES",
+            "bid_strategy": "LOWEST_COST_WITH_BID_CAP",
+            "bid_amount": 1000,
+            "start_time": "2026-05-14T09:00:00-0400",
+            "end_time": "2026-06-14T09:00:00-0400",
+            "targeting": {
+              "age_max": 65,
+              "age_min": 18,
+              "geo_locations": {
+                "countries": [
+                  "US"
+                ],
+                "location_types": [
+                  "home"
+                ]
+              }
             }
           },
           "ads": {}
