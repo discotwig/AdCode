@@ -22,10 +22,10 @@ The demo account ID (`act_366643171197739`) is already set in both Ad Stack file
 
 | File | Purpose |
 |---|---|
-| `customers/demo/campaigns/demo_v1.json` | Ad Stack v1: 4 campaigns — one fully built (1 ad set, 1 ad, $10/day), three stub campaigns with no ad sets |
-| `customers/demo/campaigns/demo_v2.json` | Ad Stack v2: only the primary campaign, with a budget increase and a second ad set added — the 3 stubs are intentionally removed |
+| `customers/demo/demo_v1/demo_v1.json` | Ad Stack v1: 4 campaigns — one fully built (1 ad set, 1 ad, $10/day), three stub campaigns with no ad sets |
+| `customers/demo/demo_v2/demo_v2.json` | Ad Stack v2: only the primary campaign, with a budget increase and a second ad set added — the 3 stubs are intentionally removed |
 
-State is written to `customers/demo/state/demo_v1.json` (or `demo_v2.json`) — never to a shared account file.
+State is written to `customers/demo/demo_v1/state.json` (or `demo_v2/state.json`) — co-located with the template, like `terraform.tfstate`.
 
 ---
 
@@ -34,7 +34,7 @@ State is written to `customers/demo/state/demo_v1.json` (or `demo_v2.json`) — 
 **What it shows:** Pre-flight checks catch problems before anything touches Facebook.
 
 Ask Claude:
-> *"Validate customers/demo/campaigns/demo_v1.json"*
+> *"Validate customers/demo/demo_v1/demo_v1.json"*
 
 **Expected result:** Schema passes. AI policy review runs and confirms the creative and targeting are within policy.
 
@@ -47,7 +47,7 @@ Ask Claude:
 **What it shows:** The full changeset before any API call. This is `terraform plan`.
 
 Ask Claude:
-> *"Preview the diff for customers/demo/campaigns/demo_v1.json"*
+> *"Preview the diff for customers/demo/demo_v1/demo_v1.json"*
 
 **Expected result:**
 ```
@@ -70,9 +70,9 @@ Plan: 4 CreateCampaign, 1 CreateAdSet, 1 CreateAd
 **What it shows:** End-to-end push to the live Facebook API.
 
 Ask Claude:
-> *"Push customers/demo/campaigns/demo_v1.json"*
+> *"Push customers/demo/demo_v1/demo_v1.json"*
 
-**Expected result:** 4 campaigns created (one with an ad set and ad, three stubs). A stack state file is written to `customers/demo/state/demo_v1.json` containing the Facebook-assigned IDs.
+**Expected result:** 4 campaigns created (one with an ad set and ad, three stubs). A stack state file is written to `customers/demo/demo_v1/state.json` containing the Facebook-assigned IDs.
 
 Open Facebook Ads Manager side-by-side to show the campaigns appear in real time.
 
@@ -85,7 +85,7 @@ Open Facebook Ads Manager side-by-side to show the campaigns appear in real time
 **What it shows:** Running it twice doesn't create duplicates.
 
 Ask Claude:
-> *"Push customers/demo/campaigns/demo_v1.json again"*
+> *"Push customers/demo/demo_v1/demo_v1.json again"*
 
 **Expected result:**
 ```
@@ -101,7 +101,7 @@ No changes detected.
 **What it shows:** Removing campaigns from the Ad Stack causes them to be deleted from Facebook — the same way deleting a resource from a CloudFormation template removes it from AWS.
 
 Ask Claude:
-> *"Preview the diff for customers/demo/campaigns/demo_v2.json"*
+> *"Preview the diff for customers/demo/demo_v2/demo_v2.json"*
 
 **Expected result:**
 ```
@@ -116,7 +116,7 @@ Plan: 1 UpdateAdSet, 1 CreateAdSet, 1 CreateAd, 3 DeleteCampaign
 ```
 
 Because the plan includes deletions, pushing requires explicit confirmation. Ask Claude:
-> *"Push customers/demo/campaigns/demo_v2.json with confirm_deletes=true"*
+> *"Push customers/demo/demo_v2/demo_v2.json with confirm_deletes=true"*
 
 **Expected result:** Budget updated to $20/day, new ad set (US 45-64) created, 3 stub campaigns deleted. Verify in Ads Manager.
 
@@ -130,7 +130,7 @@ Because the plan includes deletions, pushing requires explicit confirmation. Ask
 
 1. Go into Facebook Ads Manager and manually rename the campaign or change its status.
 2. Ask Claude:
-   > *"Get the drift report for customers/demo/campaigns/demo_v2.json"*
+   > *"Get the drift report for customers/demo/demo_v2/demo_v2.json"*
 
 **Expected result:**
 ```
@@ -149,7 +149,7 @@ FIELD_MISMATCH  campaign  AdCode Demo — Brand Awareness
 *(Run Test 6 first so there is drift to remediate.)*
 
 Ask Claude:
-> *"Import the untracked ad sets into customers/demo/campaigns/demo_v1.json"*
+> *"Import the untracked ad sets into customers/demo/demo_v1/demo_v1.json"*
 
 **Expected result:**
 ```
@@ -162,7 +162,7 @@ Run plan_campaigns to verify no spurious changes before committing.
 ```
 
 Then confirm nothing would be pushed:
-> *"Validate customers/demo/campaigns/demo_v1.json"*
+> *"Validate customers/demo/demo_v1/demo_v1.json"*
 
 **Expected result:** `No changes — Facebook already matches this configuration.`
 
@@ -177,7 +177,7 @@ Commit the updated JSON to lock the imported ad sets into source control.
 **What it shows:** Instant read-only inspection from the stack state file.
 
 Ask Claude:
-> *"Show me the local state for customers/demo/campaigns/demo_v1.json"*
+> *"Show me the local state for customers/demo/demo_v1/demo_v1.json"*
 
 **Expected result:** Full stack state JSON with all Facebook IDs, returned instantly with no API call.
 
@@ -205,10 +205,10 @@ Ask Claude:
 
 ## Cleanup after the demo
 
-The stack state file now tracks the remaining campaign from `demo_v2.json`. To tear it down, remove all campaigns from the Ad Stack (or delete `state/demo_v2.json` manually) and push with an empty campaigns list.
+The stack state file now tracks the remaining campaign from `demo_v2/demo_v2.json`. To tear it down, remove all campaigns from the Ad Stack (or delete `demo_v2/state.json` manually) and push with an empty campaigns list.
 
 Ask Claude:
-> *"Push customers/demo/campaigns/demo_v2.json with an empty campaigns array and confirm_deletes=true"*
+> *"Push customers/demo/demo_v2/demo_v2.json with an empty campaigns array and confirm_deletes=true"*
 
 Or delete the objects directly in Ads Manager — AdCode won't recreate anything that isn't in the Ad Stack.
 

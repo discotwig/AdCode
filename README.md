@@ -50,35 +50,32 @@ See ADR-010 for the mailroom design rationale. See ADR-011 for the sender-agnost
 After receiving a forwarded template, the operator applies it locally:
 
 ```bash
-# 1. Save the template to the customer's campaigns directory
-#    (copy attachment from email to customers/<slug>/campaigns/)
+# 1. Save the template into the customer's stack folder
+#    (copy attachment from email to customers/<slug>/<stack-name>/<stack-name>.json)
 
 # 2. Start the MCP server scoped to that customer
 python src/mcp_server.py --config customers/<slug>/config.json
 
 # 3. Use your AI client (Claude, Gemini, Cursor) to plan and apply:
-#    "Plan the template at customers/acme/campaigns/q1.json"
+#    "Plan customers/acme/q1_brand/q1_brand.json"
 #    "Apply it"
-
-# — or run the CLI directly —
-python src/traffic.py customers/<slug>/campaigns/<file>.json --dry-run
-python src/traffic.py customers/<slug>/campaigns/<file>.json
 ```
 
-The state file is updated after each apply and committed to Git. The Git history is the audit trail.
+State is written to `customers/<slug>/<stack-name>/state.json` after each apply and committed to Git alongside the template. The Git history is the audit trail.
 
 ## How it works
 
-AdCode follows the same model as AWS CloudFormation or Terraform:
+AdCode follows the same model as Terraform:
 
 | Concept | AdCode equivalent |
 | --- | --- |
-| Template / Stack | Ad Stack — `campaigns/<name>.json` — declares exactly which campaigns to manage |
-| Stack state | `state/<name>.json` — maps every managed object to its Facebook ID; scoped to this stack only |
+| Stack directory | `<stack-name>/` — the folder *is* the unit of isolation, exactly like `cd my-stack/` in Terraform |
+| Template | `<stack-name>/<stack-name>.json` — desired state; you edit this |
+| Stack state | `<stack-name>/state.json` — maps every managed object to its Facebook ID (like `terraform.tfstate`) |
 | Changeset | `plan_campaigns` output — validates + shows creates, updates, and deletes |
-| Apply | `apply_campaigns` — makes Facebook match the Ad Stack, then updates the stack state file |
+| Apply | `apply_campaigns` — makes Facebook match the template, then writes `state.json` |
 
-Each Ad Stack is a matched pair: `campaigns/q2_brand.json` ↔ `state/q2_brand.json`. Two Ad Stacks in the same Facebook account are completely independent — applying one cannot delete or drift-detect the other's campaigns. See ADR-012 for the full design.
+Each stack folder is self-contained: `q2_brand/q2_brand.json` and `q2_brand/state.json` live together. State location is always `Path(json_path).parent / "state.json"` — no server-side config is needed to find it. Two stacks in the same Facebook account are completely independent. See ADR-012 and ADR-013 for the full design.
 
 **The full lifecycle in four steps:**
 
@@ -108,7 +105,7 @@ python scripts/new_customer.py <slug> <account_id>
 # e.g. python scripts/new_customer.py acme-marketing act_123456789
 ```
 
-This creates `customers/<slug>/` with a `config.json`, `.env.example`, and empty `campaigns/` and `state/` directories.
+This creates `customers/<slug>/` with a `config.json` and `.env.example`. To add a stack, create a folder: `mkdir customers/<slug>/<stack-name>` and place the template inside it.
 
 ### 3. Configure credentials
 
@@ -125,7 +122,7 @@ Facebook credentials: create a System User in Meta Business Manager, grant it ac
 python src/mcp_server.py --config customers/<slug>/config.json
 ```
 
-The `--config` flag scopes the server to that customer's campaigns and state directory. Without it, the server falls back to repo-root `campaigns/` and `state/` (useful for development).
+The `--config` flag loads the customer's `.env` file and sets `FB_ACCOUNT_ID`. State and template paths are derived from the `json_path` each tool receives — no directory config is needed.
 
 Point your MCP-compatible model at the server. The tool surface is described below.
 
@@ -150,24 +147,23 @@ Point your MCP-compatible model at the server. The tool surface is described bel
 ```text
 customers/
   <slug>/
-    config.json     Account ID + data paths for the local MCP server
-    .env            Facebook + Anthropic credentials (gitignored)
-    campaigns/
-      <stack>.json  Ad Stack definition — desired state for a named set of campaigns
-    state/
-      <stack>.json  Stack state — Facebook IDs recorded after last apply (matches stack name)
+    config.json         Account ID + slug (committed)
+    .env                Facebook + Anthropic credentials (gitignored)
+    <stack-name>/       One folder per Ad Stack — the folder IS the stack
+      <stack-name>.json Template (desired state) — edit this
+      state.json        Stack state written after apply (like terraform.tfstate)
 src/
-  api/meta.py       Facebook Marketing API client
+  api/meta.py           Facebook Marketing API client
   services/
-    state.py        State file read/write (stack-scoped)
-    validate.py     Schema and AI policy validation
-    ingest.py       Excel → JSON ingestion
-  traffic.py        Apply engine
-  reconcile.py      Drift detection
-  mcp_server.py     MCP server entry point
-schemas/            JSON Schema definitions for Ad Stacks and state files
-tests/              Test suite
-docs/               Architecture decisions, API research, build checklist
+    state.py            State file read/write (stack-scoped)
+    validate.py         Schema and AI policy validation
+    ingest.py           Excel → JSON ingestion
+  traffic.py            Apply engine
+  reconcile.py          Drift detection
+  mcp_server.py         MCP server entry point
+schemas/                JSON Schema definitions for Ad Stacks and state files
+tests/                  Test suite
+docs/                   Architecture decisions, API research, build checklist
 ```
 
 ## Ad Stack format
@@ -178,7 +174,7 @@ The structure mirrors Facebook's object hierarchy: campaign → ad set → ad �
 
 Each campaign, ad set, and ad supports an optional `fb_id` field. When present, `plan_campaigns` matches by `fb_id` instead of name, enabling stable tracking through renames. The `import_adsets` tool populates `fb_id` automatically for imported objects.
 
-The stack state file (`state/<name>.json`) is automatically written after each apply and must be committed to Git. It is named to match the Ad Stack file — `campaigns/q2_brand.json` writes its state to `state/q2_brand.json`. Two Ad Stacks for the same Facebook account never share a state file.
+`state.json` is always written in the same folder as the template and must be committed to Git alongside it. It is the only file you should never edit by hand — use `import_adsets` for surgical state updates.
 
 ## Excel ingestion
 
@@ -191,24 +187,25 @@ Each client gets their own server process, working directory, and credentials. M
 ```text
 customers/
   acme/
-    config.json        ← account_id, data paths (committed)
+    config.json        ← account_id + slug (committed)
     .env               ← FB + Anthropic credentials (gitignored)
-    campaigns/
-      q1_brand.json    ← Ad Stack: manages Q1 brand campaigns
-      q2_retail.json   ← Ad Stack: manages Q2 retail campaigns (independent)
-    state/
-      q1_brand.json    ← Stack state for q1_brand only
-      q2_retail.json   ← Stack state for q2_retail only
+    q1_brand/          ← Ad Stack folder
+      q1_brand.json    ← template
+      state.json       ← stack state (written after apply)
+    q2_retail/         ← independent Ad Stack folder
+      q2_retail.json
+      state.json
   globex/
     config.json
     .env
-    campaigns/
-    state/
+    summer_launch/
+      summer_launch.json
+      state.json
 ```
 
-A server instance started with `--config customers/acme/config.json` can only reach Acme's account and data. Each Ad Stack is isolated — applying `q1_brand.json` cannot affect campaigns tracked by `q2_retail.json`.
+A server instance started with `--config customers/acme/config.json` can only reach Acme's account and credentials. Each stack folder is isolated — applying `q1_brand/q1_brand.json` cannot affect campaigns tracked by `q2_retail/`.
 
-Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the service model and ADR-012 for the Ad Stack isolation design.
+Run `python scripts/new_customer.py <slug> <account_id>` to scaffold a new customer directory. See ADR-008 for the service model, ADR-012 for Ad Stack isolation, and ADR-013 for the Terraform-style layout.
 
 ## Connecting Gemini (or any MCP-compatible model)
 

@@ -4,6 +4,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Default fallback used by tests (patched via patch("src.services.state.STATE_DIR", tmp_path)).
+# In normal operation, every StateFile is constructed with an explicit state_dir derived
+# from the template path — this fallback is never reached in production.
 STATE_DIR = Path(__file__).parent.parent.parent / "state"
 
 

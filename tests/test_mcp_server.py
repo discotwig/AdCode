@@ -94,13 +94,13 @@ async def test_apply_campaigns_applies_when_valid(tmp_path):
 async def test_apply_campaigns_passes_stack_name_to_state_load(tmp_path):
     with (patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="example")) as mock_load,
+          patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")) as mock_load,
           patch("src.services.state.STATE_DIR", tmp_path)):
         await _apply_campaigns({"json_path": EXAMPLE_PATH})
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    assert stack_name_passed == "example"
+    assert stack_name_passed == "state"
 
 
 @pytest.mark.asyncio
@@ -182,7 +182,7 @@ async def test_plan_campaigns_does_not_call_apply(tmp_path):
 @pytest.mark.asyncio
 async def test_plan_campaigns_passes_stack_name_to_state_load(tmp_path):
     meta = _make_meta_client()
-    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="state")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
           patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
@@ -191,7 +191,7 @@ async def test_plan_campaigns_passes_stack_name_to_state_load(tmp_path):
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    assert stack_name_passed == "example"
+    assert stack_name_passed == "state"
 
 
 @pytest.mark.asyncio
@@ -351,7 +351,7 @@ async def test_get_local_state_filters_by_name(tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_local_state_passes_stack_name(tmp_path):
-    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="state")
     json_path = str(CAMPAIGNS_DIR / "example.json")
 
     with (patch("src.mcp_server.StateFile.load", return_value=state) as mock_load,
@@ -361,7 +361,7 @@ async def test_get_local_state_passes_stack_name(tmp_path):
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    assert stack_name_passed == "example"
+    assert stack_name_passed == "state"
 
 
 @pytest.mark.asyncio
@@ -408,7 +408,7 @@ async def test_get_drift_report_returns_report(tmp_path):
 @pytest.mark.asyncio
 async def test_get_drift_report_passes_stack_name(tmp_path):
     meta = _make_meta_client()
-    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="example")
+    state = StateFile(EXAMPLE_JSON["account_id"], stack_name="state")
     json_path = str(CAMPAIGNS_DIR / "example.json")
     with (patch("src.mcp_server._get_meta_client", return_value=meta),
           patch("src.mcp_server.StateFile.load", return_value=state) as mock_load):
@@ -416,7 +416,7 @@ async def test_get_drift_report_passes_stack_name(tmp_path):
     call_kwargs = mock_load.call_args
     assert call_kwargs is not None
     stack_name_passed = call_kwargs.kwargs.get("stack_name") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    assert stack_name_passed == "example"
+    assert stack_name_passed == "state"
 
 
 # ------------------------------------------------------------------

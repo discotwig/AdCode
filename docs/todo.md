@@ -425,3 +425,33 @@ Shift state files from account-scoped to stack-scoped. Each Ad Stack (`campaigns
 - [x] **Move** `customers/demo/campaigns/act_366643171197739/demo_v1.json` → `customers/demo/campaigns/demo_v1.json`
 - [x] **Delete** `customers/demo/campaigns/act_366643171197739/` directory
 - [x] **Rename** `customers/demo/state/act_366643171197739.json` → `customers/demo/state/demo_v1.json`
+
+---
+
+## Phase 20 — Terraform Stack Layout (ADR-013)
+
+Co-locate template and state in a single stack folder, matching Terraform's convention. Each stack is a directory (`<stack-name>/`) containing `<stack-name>.json` (template) and `state.json`. State location is derived entirely from `json_path` — `_require_state_dir()` and `_state_dir` global removed.
+
+### Documentation
+
+- [x] **Write ADR-013** — `docs/decisions/013-terraform-stack-layout.md`
+- [x] **Update README** — "How it works" table, repository layout, operator workflow, multi-tenant example
+- [ ] **Update `docs/demo/demo.md`** — new paths (`demo_v1/demo_v1.json`, `demo_v1/state.json`)
+
+### Tests
+
+- [ ] **`tests/test_mcp_server.py`** — change `stack_name="example"` assertions → `stack_name="state"`; remove any `_require_state_dir` patches
+
+### Code
+
+- [ ] **`src/mcp_server.py`** — remove `_state_dir`, `_campaigns_dir`, `_require_state_dir()`; all handlers use `state_dir=Path(json_path).parent`, `stack_name="state"`
+- [ ] **`schemas/customer_config.schema.json`** — remove `campaigns_dir` and `state_dir` properties
+- [ ] **`scripts/new_customer.py`** — update scaffold to flat layout (no `campaigns/`/`state/` subdirs)
+
+### Demo restructure
+
+- [ ] **Create** `customers/demo/demo_v1/`
+- [ ] **Move** `customers/demo/campaigns/demo_v1.json` → `customers/demo/demo_v1/demo_v1.json`
+- [ ] **Rename** `customers/demo/state/demo_v1.json` → `customers/demo/demo_v1/state.json`
+- [ ] **Delete** `customers/demo/campaigns/` and `customers/demo/state/` directories
+- [ ] **Update** `customers/demo/config.json` — remove `campaigns_dir` and `state_dir`

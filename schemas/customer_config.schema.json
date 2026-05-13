@@ -16,16 +16,6 @@
       "type": "string",
       "description": "Facebook ad account ID in act_XXXXXXXXX format.",
       "pattern": "^act_[0-9]+$"
-    },
-    "campaigns_dir": {
-      "type": "string",
-      "description": "Directory containing campaign JSON files, relative to this config file. Defaults to 'campaigns'.",
-      "default": "campaigns"
-    },
-    "state_dir": {
-      "type": "string",
-      "description": "Directory for state files, relative to this config file. Defaults to 'state'.",
-      "default": "state"
     }
   }
 }

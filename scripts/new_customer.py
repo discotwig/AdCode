@@ -30,16 +30,11 @@ def main() -> int:
         print(f"Error: {customer_dir} already exists.", file=sys.stderr)
         return 1
 
-    (customer_dir / "campaigns").mkdir(parents=True)
-    (customer_dir / "state").mkdir(parents=True)
-    (customer_dir / "campaigns" / ".gitkeep").touch()
-    (customer_dir / "state" / ".gitkeep").touch()
+    customer_dir.mkdir(parents=True)
 
     config = {
         "customer_slug": args.slug,
         "account_id": args.account_id,
-        "campaigns_dir": "campaigns",
-        "state_dir": "state",
     }
     (customer_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     shutil.copy(REPO_ROOT / ".env.example", customer_dir / ".env.example")
@@ -49,7 +44,10 @@ def main() -> int:
     print("Next steps:")
     print(f"  1. cp customers/{args.slug}/.env.example customers/{args.slug}/.env")
     print(f"  2. Fill in FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, ANTHROPIC_API_KEY")
-    print(f"  3. python src/mcp_server.py --config customers/{args.slug}/config.json")
+    print(f"  3. Create a stack folder for your first Ad Stack:")
+    print(f"       mkdir customers/{args.slug}/<stack-name>")
+    print(f"       # Place your template at customers/{args.slug}/<stack-name>/<stack-name>.json")
+    print(f"  4. python src/mcp_server.py --config customers/{args.slug}/config.json")
     return 0
 
 

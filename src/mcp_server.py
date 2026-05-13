@@ -26,10 +26,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set by --config at startup; None means use repo-root defaults.
-_state_dir: Path | None = None
-_campaigns_dir: Path | None = None
-
 app = Server("adcode")
 
 
@@ -44,6 +40,15 @@ def _get_meta_client() -> MetaClient:
 
 def _get_ai_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+
+def _stack_state_dir(json_path: str) -> Path:
+    """Return the stack directory (parent of the template file).
+
+    State is always written as state.json inside this directory, co-located
+    with the template — matching Terraform's terraform.tfstate convention.
+    """
+    return Path(json_path).parent
 
 
 def _resolve_campaign_json(json_path: str | None, json_str: str | None) -> dict:
@@ -115,7 +120,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "required": ["json_path"],
                 "properties": {
-                    "json_path": {"type": "string", "description": "Path to the Ad Stack JSON file (e.g. customers/acme/campaigns/q2_brand.json)."},
+                    "json_path": {"type": "string", "description": "Path to the Ad Stack template file (e.g. customers/acme/q2_brand/q2_brand.json). State is read from state.json in the same folder."},
                     "campaign_name": {"type": "string", "description": "Filter by campaign name (substring match)."},
                 },
             },
@@ -149,7 +154,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "required": ["json_path"],
                 "properties": {
-                    "json_path": {"type": "string", "description": "Path to the Ad Stack JSON file (e.g. customers/acme/campaigns/q2_brand.json)."},
+                    "json_path": {"type": "string", "description": "Path to the Ad Stack template file (e.g. customers/acme/q2_brand/q2_brand.json)."},
                 },
             },
         ),
@@ -165,7 +170,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "json_path": {"type": "string", "description": "Path to campaign JSON file in the repo."},
+                    "json_path": {"type": "string", "description": "Path to the Ad Stack template file (e.g. customers/acme/q2_brand/q2_brand.json). State is read/written as state.json in the same folder."},
                     "json_str": {"type": "string", "description": "Inline campaign JSON string."},
                 },
             },
@@ -331,8 +336,8 @@ async def _plan_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    stack_name = Path(args["json_path"]).stem if args.get("json_path") else None
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state_dir = _stack_state_dir(args["json_path"]) if args.get("json_path") else None
+    state = StateFile.load(account_id, stack_name="state", state_dir=state_dir)
     p = plan(campaign_json, state, meta)
 
     diff_section = _format_plan(p) if len(p) > 0 else "No changes — Facebook already matches this configuration."
@@ -350,8 +355,8 @@ async def _apply_campaigns(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     account_id = campaign_json["account_id"]
-    stack_name = Path(args["json_path"]).stem if args.get("json_path") else None
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state_dir = _stack_state_dir(args["json_path"]) if args.get("json_path") else None
+    state = StateFile.load(account_id, stack_name="state", state_dir=state_dir)
     p = plan(campaign_json, state, meta)
 
     if len(p) == 0:
@@ -386,8 +391,8 @@ async def _pause_campaigns(args: dict) -> list[TextContent]:
     live_campaigns = meta.list_campaigns(account_id)
 
     paused = []
-    stack_name = Path(json_path).stem if json_path else None
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state_dir = _stack_state_dir(json_path) if json_path else None
+    state = StateFile.load(account_id, stack_name="state", state_dir=state_dir)
 
     for c in live_campaigns:
         fb_id = c["id"]
@@ -413,11 +418,11 @@ async def _get_local_state(args: dict) -> list[TextContent]:
     json_path = args.get("json_path")
     account_id = args.get("account_id", os.environ.get("FB_ACCOUNT_ID", ""))
     campaign_name_filter = args.get("campaign_name", "").lower()
-    stack_name = Path(json_path).stem if json_path else None
+    state_dir = _stack_state_dir(json_path) if json_path else None
     if not account_id and json_path:
         campaign_json = load_campaign_json(json_path)
         account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state = StateFile.load(account_id, stack_name="state", state_dir=state_dir)
 
     campaigns = state.campaigns()
     if campaign_name_filter:
@@ -439,16 +444,16 @@ async def _get_campaign_status(args: dict) -> list[TextContent]:
 async def _get_drift_report(args: dict) -> list[TextContent]:
     json_path = args.get("json_path")
     account_id = args.get("account_id", "")
-    stack_name = None
+    state_dir = None
     if json_path:
-        stack_name = Path(json_path).stem
+        state_dir = _stack_state_dir(json_path)
         if not account_id:
             campaign_json = load_campaign_json(json_path)
             account_id = campaign_json["account_id"]
     elif not account_id:
         account_id = os.environ.get("FB_ACCOUNT_ID", "")
     meta = _get_meta_client()
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state = StateFile.load(account_id, stack_name="state", state_dir=state_dir)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
     return [TextContent(type="text", text=format_report(report))]
@@ -492,10 +497,9 @@ async def _import_adsets(args: dict) -> list[TextContent]:
     account_id = args["account_id"]
     json_path = args["json_path"]
     name_filter = set(args["adset_names"]) if args.get("adset_names") else None
-    stack_name = Path(json_path).stem
 
     meta = _get_meta_client()
-    state = StateFile.load(account_id, stack_name=stack_name, state_dir=_state_dir)
+    state = StateFile.load(account_id, stack_name="state", state_dir=_stack_state_dir(json_path))
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
 
@@ -595,13 +599,17 @@ async def _find_duplicates(args: dict) -> list[TextContent]:
 # ------------------------------------------------------------------
 
 def _load_customer_config(config_path: str) -> None:
-    global _state_dir, _campaigns_dir
     path = Path(config_path).resolve()
     with open(path, encoding="utf-8") as f:
         config = json.load(f)
     base = path.parent
-    _state_dir = base / config.get("state_dir", "state")
-    _campaigns_dir = base / config.get("campaigns_dir", "campaigns")
+
+    # Load the customer's .env file before anything else so credentials are available.
+    customer_env = base / ".env"
+    if customer_env.exists():
+        load_dotenv(customer_env, override=True)
+        logger.info("Loaded customer .env: %s", customer_env)
+
     if config.get("account_id") and not os.environ.get("FB_ACCOUNT_ID"):
         os.environ["FB_ACCOUNT_ID"] = config["account_id"]
     logger.info("Loaded customer config: slug=%s account=%s", config.get("customer_slug"), config.get("account_id"))
@@ -645,6 +653,11 @@ def main():
         if not skip_check:
             if not _check_facebook_connection():
                 raise SystemExit(1)
+    else:
+        logger.warning(
+            "No --config provided. Credentials must be set in environment variables. "
+            "Run with --config customers/<slug>/config.json to load credentials from the customer .env file."
+        )
 
     asyncio.run(_main())
 
