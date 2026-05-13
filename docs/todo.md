@@ -372,7 +372,7 @@ Decouple the email bot from the engine. The bot validates and routes submissions
 
 - [x] **Rewrite `tests/test_email_bot.py`** — covers three-path routing: valid template (operator forward + client ack), invalid template (errors returned), dirty Excel (seeded template returned); 27 tests passing
 - [x] **Delete `tests/test_pending_expiry.py`** — pending file mechanism removed
-- [ ] **Add `--config` connection check test** to `tests/test_mcp_server.py`
+- [x] **Add `--config` connection check test** to `tests/test_mcp_server.py`
 
 ---
 

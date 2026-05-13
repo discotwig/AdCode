@@ -7,7 +7,7 @@ from src.mcp_server import (
     _apply_campaigns, _plan_campaigns, _pause_campaigns,
     _get_local_state, _get_campaign_status, _get_drift_report,
     _list_campaigns, _ingest_excel, _import_adsets, _find_duplicates,
-    _get_campaign_export, list_tools,
+    _get_campaign_export, list_tools, _check_facebook_connection, main,
 )
 from src.services.state import StateFile
 
@@ -571,3 +571,46 @@ async def test_find_duplicates_no_duplicates():
     data = json.loads(result[0].text)
     assert data["duplicate_count"] == 0
     assert data["duplicates"] == {}
+
+
+# ------------------------------------------------------------------
+# _check_facebook_connection / --config startup gate
+# ------------------------------------------------------------------
+
+def test_check_facebook_connection_returns_true_on_success():
+    meta = _make_meta_client()
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = _check_facebook_connection()
+    assert result is True
+    meta.list_campaigns.assert_called_once_with("act_123")
+
+
+def test_check_facebook_connection_returns_false_on_failure():
+    meta = _make_meta_client()
+    meta.list_campaigns.side_effect = Exception("bad token")
+    with (patch("src.mcp_server._get_meta_client", return_value=meta),
+          patch.dict("os.environ", {"FB_ACCOUNT_ID": "act_123"})):
+        result = _check_facebook_connection()
+    assert result is False
+
+
+def test_main_exits_when_config_connection_fails(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"customer_slug": "test", "account_id": "act_123"}))
+    with (patch("sys.argv", ["mcp_server", "--config", str(config_path)]),
+          patch("src.mcp_server._check_facebook_connection", return_value=False)):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+    assert exc_info.value.code == 1
+
+
+def test_main_skips_check_with_flag(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"customer_slug": "test", "account_id": "act_123"}))
+    mock_check = MagicMock()
+    with (patch("sys.argv", ["mcp_server", "--config", str(config_path), "--skip-connection-check"]),
+          patch("src.mcp_server._check_facebook_connection", mock_check),
+          patch("asyncio.run")):
+        main()
+    mock_check.assert_not_called()
