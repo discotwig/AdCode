@@ -7,7 +7,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 | ADR | Summary |
 | --- | --- |
 | [004](004-unified-changeset.md) | Plan/apply uses one changeset covering creates, updates, and deletes. Deletes require confirmation. |
-| [005](005-import-untracked-adsets.md) | `import_adsets` adopts live Facebook ad sets into template and state. |
+| [005](005-import-untracked-adsets.md) | Import workflow foundation; tool names are superseded by ADR-015. |
 | [006](006-facebook-pull-fidelity.md) | Preserve Facebook-returned values carefully when pulling live data. |
 | [008](008-contractor-service-model.md) | V1 commercial and operational model is a contractor service, not SaaS. |
 | [010](010-mailroom-engine-split.md) | Hosted email bot is a mailroom integration; execution runs locally. |
@@ -15,6 +15,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 | [012](012-ad-stack-model.md) | State is stack-scoped, not account-scoped. |
 | [013](013-terraform-stack-layout.md) | Stack folder co-locates template and state. |
 | [014](014-stack-level-env.md) | `--config` points to a stack template and loads stack-local `.env`. |
+| [015](015-strict-iac-mcp-surface.md) | MCP exposes stack-scoped IaC tools, not a general live ad account console. |
 
 ## Historical ADRs
 

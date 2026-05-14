@@ -13,14 +13,15 @@ import anthropic
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 from src.api.meta import MetaClient
+from src.reconcile import DriftType, diff_state, fetch_actuals, format_report
+from src.services.ingest import extract_campaigns, format_ambiguity_report, read_excel
 from src.services.state import StateFile
 from src.services.validate import validate_all
-from src.services.ingest import read_excel, extract_campaigns, format_ambiguity_report
-from src.traffic import load_campaign_json, plan, apply as apply_plan, DeleteCampaign, DeleteAdSet, DeleteAd
-from src.reconcile import fetch_actuals, diff_state, format_report, DriftType
+from src.traffic import apply as apply_plan
+from src.traffic import load_campaign_json, plan
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,8 @@ app = Server("adcode")
 _STACK_JSON_PATH: Path | None = None
 _STACK_STATE_DIR: Path | None = None
 _ACCOUNT_ID: str = ""
+
+SUPPORTED_IMPORT_RESOURCE_TYPES = {"adset"}
 
 
 def _get_meta_client() -> MetaClient:
@@ -48,20 +51,23 @@ def _get_ai_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
-def _resolve_campaign_json(json_str: str | None = None) -> dict:
-    """Load the active stack template, with an optional inline JSON override."""
-    if json_str:
-        import jsonschema
-        data = json.loads(json_str)
-        from src.traffic import _CAMPAIGN_SCHEMA
-        jsonschema.validate(data, _CAMPAIGN_SCHEMA)
-        return data
-    if _STACK_JSON_PATH is None:
+def _require_stack_config() -> tuple[Path, Path, str]:
+    if _STACK_JSON_PATH is None or _STACK_STATE_DIR is None or not _ACCOUNT_ID:
         raise ValueError(
             "MCP server not configured with a stack. "
             "Start with: python src/mcp_server.py --config <stack>_template.json"
         )
-    return load_campaign_json(str(_STACK_JSON_PATH))
+    return _STACK_JSON_PATH, _STACK_STATE_DIR, _ACCOUNT_ID
+
+
+def _resolve_campaign_json() -> dict:
+    json_path, _, _ = _require_stack_config()
+    return load_campaign_json(str(json_path))
+
+
+def _load_state(account_id: str) -> StateFile:
+    _, state_dir, _ = _require_stack_config()
+    return StateFile.load(account_id, stack_name="state", state_dir=state_dir)
 
 
 # ------------------------------------------------------------------
@@ -72,191 +78,121 @@ def _resolve_campaign_json(json_str: str | None = None) -> dict:
 async def list_tools() -> list[Tool]:
     return [
         Tool(
-            name="apply_campaigns",
+            name="show_stack",
             description=(
-                "Apply the active Ad Stack template to Facebook — creates, updates, and deletes objects "
-                "so Facebook matches the template exactly. "
-                "Run plan_campaigns first to review what will change. "
-                "Blocked if validation finds errors. "
-                "If the plan includes deletions, returns the plan and waits for confirm_deletes=true "
-                "before proceeding — call again with that flag set to confirm."
+                "Show the active AdCode stack configuration: template path, state path, account ID, "
+                "and local .env presence. Does not call Facebook or expose credential values."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="validate_stack",
+            description=(
+                "Validate the active stack template with JSON Schema and AI policy checks. "
+                "Does not call Facebook and does not change local files."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="plan_stack",
+            description=(
+                "Validate the active stack and show the changeset needed to make Facebook match the template. "
+                "No changes are made to Facebook or local state. Always run this before apply_stack."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="apply_stack",
+            description=(
+                "Apply the active stack to Facebook and update local state. Deletes require a second call "
+                "with confirm_deletes=true after reviewing plan_stack output."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "json_str": {"type": "string", "description": "Inline campaign JSON string (overrides the stack template)."},
-                    "confirm_deletes": {"type": "boolean", "description": "Set true to proceed when the plan includes deletions."},
+                    "confirm_deletes": {
+                        "type": "boolean",
+                        "description": "Set true to proceed when the plan includes deletions.",
+                    },
                 },
             },
         ),
         Tool(
-            name="pause_campaigns",
+            name="drift_stack",
             description=(
-                "Pause campaigns on Facebook matching a name or ID filter. "
-                "Queries Facebook directly for the current campaign list — "
-                "works even for campaigns not tracked in the local state file. "
-                "Already-paused campaigns are reported but not re-paused."
+                "Compare this stack's managed state to live Facebook data. Reports missing managed objects "
+                "and field mismatches only; unmanaged account objects are intentionally excluded."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="show_state",
+            description=(
+                "Read campaigns from this stack's state.json. Does not call Facebook. "
+                "Use this to inspect tracked configuration and Facebook IDs."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "campaign_name": {"type": "string"},
-                    "account_id": {"type": "string"},
-                    "campaign_id": {"type": "string"},
+                    "campaign_name": {
+                        "type": "string",
+                        "description": "Optional campaign name substring filter.",
+                    },
                 },
             },
         ),
         Tool(
-            name="get_local_state",
+            name="search_import_candidates",
             description=(
-                "Read campaigns from this Ad Stack's state file (cache). "
-                "Never calls the Facebook API — returns what AdCode last recorded after a push. "
-                "Only shows campaigns tracked by this specific Ad Stack. "
-                "Use this to inspect tracked configuration or fb_ids. "
-                "Do NOT use this to answer questions about what currently exists on Facebook; "
-                "use list_campaigns for that."
+                "Search for supported live resources that can be adopted into the active stack. "
+                "Currently supports resource_type='adset' and only returns ad sets under campaigns "
+                "declared in the stack template."
             ),
             inputSchema={
                 "type": "object",
+                "required": ["resource_type"],
                 "properties": {
-                    "campaign_name": {"type": "string", "description": "Filter by campaign name (substring match)."},
+                    "resource_type": {
+                        "type": "string",
+                        "description": "Resource type to search. Currently only 'adset' is supported.",
+                    },
                 },
             },
         ),
         Tool(
-            name="get_campaign_status",
+            name="import_resource",
             description=(
-                "Fetch live fields for a single campaign directly from Facebook by ID. "
-                "Returns status, effective_status, objective, and budget fields. "
-                "Use list_campaigns first if you don't already have the campaign ID."
+                "Adopt a supported live resource into the active stack template and state file. "
+                "Currently supports resource_type='adset'. This writes local files only and never "
+                "pushes changes to Facebook."
             ),
             inputSchema={
                 "type": "object",
-                "required": ["campaign_id"],
+                "required": ["resource_type"],
                 "properties": {
-                    "campaign_id": {"type": "string", "description": "Facebook campaign ID (e.g. 120244515578050719)."},
+                    "resource_type": {
+                        "type": "string",
+                        "description": "Resource type to import. Currently only 'adset' is supported.",
+                    },
+                    "names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional subset of resource names to import.",
+                    },
                 },
             },
         ),
         Tool(
-            name="get_drift_report",
+            name="generate_stack_from_excel",
             description=(
-                "Compare this Ad Stack's state to live Facebook data and report any divergence. "
-                "Only checks campaigns declared in this stack — never reports on campaigns from other stacks. "
-                "Detects: objects in state that no longer exist on Facebook (deleted externally), "
-                "objects on Facebook not tracked in state (created outside AdCode), "
-                "and field mismatches (edited manually in Ads Manager). "
-                "Does not make any changes — read-only."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-        Tool(
-            name="plan_campaigns",
-            description=(
-                "Validate the active Ad Stack template and show the full changeset that apply_campaigns "
-                "would execute — no changes are made to Facebook. "
-                "Returns schema and AI policy validation results plus a diff of creates, updates, and deletes. "
-                "Changes are scoped to this stack only — other stacks are unaffected. "
-                "Always run this before apply_campaigns."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "json_str": {"type": "string", "description": "Inline campaign JSON string (overrides the stack template)."},
-                },
-            },
-        ),
-        Tool(
-            name="list_campaigns",
-            description=(
-                "Fetch all campaigns directly from Facebook for a given ad account. "
-                "Always calls the live Facebook API — never reads from the local state file. "
-                "Use this to see what actually exists on Facebook, including campaigns that "
-                "were created outside of AdCode or are not tracked in state. "
-                "Returns id, name, objective, status, and effective_status for each campaign."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "account_id": {"type": "string", "description": "Ad account ID (e.g. act_123). Defaults to FB_ACCOUNT_ID env var."},
-                },
-            },
-        ),
-        Tool(
-            name="ingest_excel",
-            description=(
-                "Extract campaign JSON from an Excel brief using AI. "
-                "Reads all sheets, maps rows to the campaign JSON schema, and flags anything ambiguous for human review. "
-                "Returns extracted campaign JSON plus an ambiguity report. "
-                "Commit the resulting JSON after reviewing — do not re-ingest from Excel once the JSON is committed."
+                "Extract campaign JSON from an Excel brief using AI and flag ambiguities for review. "
+                "Returns a starter stack template; it does not call Facebook."
             ),
             inputSchema={
                 "type": "object",
                 "required": ["excel_path"],
                 "properties": {
                     "excel_path": {"type": "string"},
-                },
-            },
-        ),
-        Tool(
-            name="import_adsets",
-            description=(
-                "Adopt ad sets that exist on Facebook but are not tracked in the AdCode state file "
-                "(MISSING_FROM_STATE items from get_drift_report). "
-                "Fetches each ad set's live configuration from Facebook, merges it into the stack template, "
-                "and registers it in the state file so plan_campaigns treats it as already managed. "
-                "Does not push any changes to Facebook — read-then-write to local files only. "
-                "Run plan_campaigns after importing to confirm no spurious changes before committing."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "adset_names": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Subset of ad set names to import. Imports all MISSING_FROM_STATE ad sets if omitted.",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="get_campaign_export",
-            description=(
-                "Fetch the full campaign hierarchy from Facebook for an ad account — "
-                "campaigns, ad sets, and ads in a single nested response. "
-                "Always calls the live Facebook API. "
-                "Use this to get a complete snapshot of everything in the account, "
-                "including objects not tracked in the local state file."
-            ),
-            inputSchema={
-                "type": "object",
-                "required": ["account_id"],
-                "properties": {
-                    "account_id": {
-                        "type": "string",
-                        "description": "Ad account ID (e.g. act_366643171197739).",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="find_duplicates",
-            description=(
-                "Find campaigns with duplicate names in the Facebook Ad Account. "
-                "Fetches all campaigns live from Facebook, groups by name, and returns any name "
-                "that maps to more than one fb_id — along with created_time and status for each. "
-                "Use this to detect accidental duplicates before applying a campaign JSON."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "account_id": {
-                        "type": "string",
-                        "description": "Ad account ID (e.g. act_366643171197739). Defaults to FB_ACCOUNT_ID env var.",
-                    },
                 },
             },
         ),
@@ -269,42 +205,41 @@ async def list_tools() -> list[Tool]:
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    arguments = arguments or {}
     try:
-        if name == "apply_campaigns":
-            return await _apply_campaigns(arguments)
-        elif name == "plan_campaigns":
-            return await _plan_campaigns(arguments)
-        elif name == "pause_campaigns":
-            return await _pause_campaigns(arguments)
-        elif name == "get_local_state":
-            return await _get_local_state(arguments)
-        elif name == "get_campaign_status":
-            return await _get_campaign_status(arguments)
-        elif name == "get_drift_report":
-            return await _get_drift_report(arguments)
-        elif name == "list_campaigns":
-            return await _list_campaigns(arguments)
-        elif name == "ingest_excel":
-            return await _ingest_excel(arguments)
-        elif name == "import_adsets":
-            return await _import_adsets(arguments)
-        elif name == "get_campaign_export":
-            return await _get_campaign_export(arguments)
-        elif name == "find_duplicates":
-            return await _find_duplicates(arguments)
-        else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
-    except Exception as e:
+        if name == "show_stack":
+            return await _show_stack(arguments)
+        if name == "validate_stack":
+            return await _validate_stack(arguments)
+        if name == "plan_stack":
+            return await _plan_stack(arguments)
+        if name == "apply_stack":
+            return await _apply_stack(arguments)
+        if name == "drift_stack":
+            return await _drift_stack(arguments)
+        if name == "show_state":
+            return await _show_state(arguments)
+        if name == "search_import_candidates":
+            return await _search_import_candidates(arguments)
+        if name == "import_resource":
+            return await _import_resource(arguments)
+        if name == "generate_stack_from_excel":
+            return await _generate_stack_from_excel(arguments)
+        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    except Exception as exc:
         logger.exception("Tool %s failed", name)
-        return [TextContent(type="text", text=f"Error: {e}")]
+        return [TextContent(type="text", text=f"Error: {exc}")]
 
 
 def _format_plan(p) -> str:
     lines = [f"Plan: {p.summary()}", ""]
     for op in p.operations:
         op_type = type(op).__name__
-        cname = (getattr(op, "campaign_name", None)
-                 or getattr(op, "campaign", {}).get("name", "") or "")
+        cname = (
+            getattr(op, "campaign_name", None)
+            or getattr(op, "campaign", {}).get("name", "")
+            or ""
+        )
         aname = getattr(op, "adset_name", "")
         ad_name = getattr(op, "ad_name", "")
         fb_id = getattr(op, "fb_id", "")
@@ -312,99 +247,82 @@ def _format_plan(p) -> str:
         if op_type.startswith("Delete"):
             label = f"  DELETE {op_type.replace('Delete', '').lower()}"
             detail = " / ".join(filter(None, [cname, aname, ad_name]))
-            lines.append(f"{label}: \"{detail}\"  (fb_id: {fb_id})")
+            lines.append(f'{label}: "{detail}"  (fb_id: {fb_id})')
         elif hasattr(op, "changed_fields"):
-            lines.append(f"  {op_type}: {cname} — fields: {list(op.changed_fields.keys())}")
+            lines.append(f"  {op_type}: {cname} - fields: {list(op.changed_fields.keys())}")
         else:
             lines.append(f"  {op_type}: {cname}")
     return "\n".join(lines)
 
 
-async def _plan_campaigns(args: dict) -> list[TextContent]:
-    campaign_json = _resolve_campaign_json(args.get("json_str"))
-    ai_client = _get_ai_client()
-    validation = validate_all(campaign_json, ai_client)
+async def _show_stack(args: dict) -> list[TextContent]:
+    json_path, state_dir, account_id = _require_stack_config()
+    data = {
+        "template_path": str(json_path),
+        "stack_dir": str(state_dir),
+        "state_path": str(state_dir / "state.json"),
+        "env_path": str(state_dir / ".env"),
+        "env_exists": (state_dir / ".env").exists(),
+        "account_id": account_id,
+        "configured": True,
+    }
+    return [TextContent(type="text", text=json.dumps(data, indent=2))]
 
-    meta = _get_meta_client()
-    account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
-    p = plan(campaign_json, state, meta)
 
-    diff_section = _format_plan(p) if len(p) > 0 else "No changes — Facebook already matches this configuration."
-    lines = [validation.summary(), "", diff_section]
-    return [TextContent(type="text", text="\n".join(lines))]
+async def _validate_stack(args: dict) -> list[TextContent]:
+    campaign_json = _resolve_campaign_json()
+    validation = validate_all(campaign_json, _get_ai_client())
+    return [TextContent(type="text", text=validation.summary())]
 
 
-async def _apply_campaigns(args: dict) -> list[TextContent]:
-    campaign_json = _resolve_campaign_json(args.get("json_str"))
-    ai_client = _get_ai_client()
-    validation = validate_all(campaign_json, ai_client)
+async def _plan_stack(args: dict) -> list[TextContent]:
+    campaign_json = _resolve_campaign_json()
+    validation = validate_all(campaign_json, _get_ai_client())
+
+    state = _load_state(campaign_json["account_id"])
+    p = plan(campaign_json, state, None)
+
+    diff_section = _format_plan(p) if len(p) > 0 else "No changes - Facebook already matches this configuration."
+    return [TextContent(type="text", text="\n".join([validation.summary(), "", diff_section]))]
+
+
+async def _apply_stack(args: dict) -> list[TextContent]:
+    campaign_json = _resolve_campaign_json()
+    validation = validate_all(campaign_json, _get_ai_client())
 
     if not validation.is_pushable:
         return [TextContent(type="text", text=f"Blocked by validation.\n\n{validation.summary()}")]
 
     meta = _get_meta_client()
-    account_id = campaign_json["account_id"]
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
+    state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, meta)
 
     if len(p) == 0:
         return [TextContent(type="text", text=f"No changes detected.\n\n{validation.summary()}")]
 
     if p.has_deletes and not args.get("confirm_deletes"):
-        msg = (
+        message = (
             f"{validation.summary()}\n\n"
             "Plan includes deletions. Call again with confirm_deletes=true to proceed.\n\n"
             + _format_plan(p)
         )
-        return [TextContent(type="text", text=msg)]
+        return [TextContent(type="text", text=message)]
 
+    json_path, _, _ = _require_stack_config()
     result = apply_plan(
         p,
         meta,
         state,
         campaign_json=campaign_json,
-        campaign_json_path=str(_STACK_JSON_PATH) if _STACK_JSON_PATH else None,
+        campaign_json_path=str(json_path),
     )
-    lines = [validation.summary(), "", f"Applied: {result.summary()}"]
-    return [TextContent(type="text", text="\n".join(lines))]
+    return [TextContent(type="text", text="\n".join([validation.summary(), "", f"Applied: {result.summary()}"]))]
 
 
-async def _pause_campaigns(args: dict) -> list[TextContent]:
-    meta = _get_meta_client()
-    account_id = _ACCOUNT_ID or os.environ.get("FB_ACCOUNT_ID", "")
-    campaign_name = args.get("campaign_name")
-    campaign_id_filter = args.get("campaign_id")
-
-    live_campaigns = meta.list_campaigns(account_id)
-
-    paused = []
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
-
-    for c in live_campaigns:
-        fb_id = c["id"]
-        cname = c["name"]
-        if campaign_name and campaign_name.lower() not in cname.lower():
-            continue
-        if campaign_id_filter and fb_id != campaign_id_filter:
-            continue
-        if c.get("status") == "PAUSED":
-            paused.append(f"{cname} ({fb_id}) — already paused")
-            continue
-        meta.pause_campaign(fb_id)
-        state.upsert_campaign(cname, fb_id, {**c, "status": "PAUSED"})
-        paused.append(f"{cname} ({fb_id})")
-
-    if paused:
-        state.save()
-        return [TextContent(type="text", text="Paused:\n" + "\n".join(f"  - {p}" for p in paused))]
-    return [TextContent(type="text", text="No matching campaigns found.")]
-
-
-async def _get_local_state(args: dict) -> list[TextContent]:
-    account_id = _ACCOUNT_ID or os.environ.get("FB_ACCOUNT_ID", "")
+async def _show_state(args: dict) -> list[TextContent]:
+    _, _, account_id = _require_stack_config()
     campaign_name_filter = args.get("campaign_name", "").lower()
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
+    state = _load_state(account_id)
 
     campaigns = state.campaigns()
     if campaign_name_filter:
@@ -416,32 +334,17 @@ async def _get_local_state(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(campaigns, indent=2))]
 
 
-async def _get_campaign_status(args: dict) -> list[TextContent]:
+async def _drift_stack(args: dict) -> list[TextContent]:
+    _, _, account_id = _require_stack_config()
     meta = _get_meta_client()
-    campaign_id = args["campaign_id"]
-    data = meta.get_campaign(campaign_id)
-    return [TextContent(type="text", text=json.dumps(data, indent=2))]
-
-
-async def _get_drift_report(args: dict) -> list[TextContent]:
-    account_id = _ACCOUNT_ID or os.environ.get("FB_ACCOUNT_ID", "")
-    meta = _get_meta_client()
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
+    state = _load_state(account_id)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
+    report.items = [item for item in report.items if item.drift_type != DriftType.MISSING_FROM_STATE]
     return [TextContent(type="text", text=format_report(report))]
 
 
-
-
-async def _list_campaigns(args: dict) -> list[TextContent]:
-    meta = _get_meta_client()
-    account_id = args.get("account_id") or os.environ.get("FB_ACCOUNT_ID", "")
-    campaigns = meta.list_campaigns(account_id)
-    return [TextContent(type="text", text=json.dumps(campaigns, indent=2))]
-
-
-async def _ingest_excel(args: dict) -> list[TextContent]:
+async def _generate_stack_from_excel(args: dict) -> list[TextContent]:
     excel_path = args["excel_path"]
     ai_client = _get_ai_client()
     excel_data = read_excel(excel_path)
@@ -456,9 +359,14 @@ async def _ingest_excel(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+def _unsupported_resource_message() -> list[TextContent]:
+    return [TextContent(type="text", text="Only resource_type='adset' is currently supported.")]
+
+
 def _to_plain(obj):
     """Recursively convert Facebook SDK Mapping/sequence objects to plain Python types."""
     import collections.abc
+
     if isinstance(obj, collections.abc.Mapping):
         return {k: _to_plain(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -466,107 +374,124 @@ def _to_plain(obj):
     return obj
 
 
-async def _import_adsets(args: dict) -> list[TextContent]:
-    account_id = _ACCOUNT_ID or os.environ.get("FB_ACCOUNT_ID", "")
-    if _STACK_JSON_PATH is None:
-        raise ValueError("MCP server not configured with a stack. Start with --config <stack>_template.json")
-    json_path = str(_STACK_JSON_PATH)
-    name_filter = set(args["adset_names"]) if args.get("adset_names") else None
+def _find_parent_campaign(actuals: dict, adset_name: str) -> str | None:
+    return next(
+        (cname for cname, cdata in actuals.items() if adset_name in cdata.get("ad_sets", {})),
+        None,
+    )
 
-    meta = _get_meta_client()
-    state = StateFile.load(account_id, stack_name="state", state_dir=_STACK_STATE_DIR)
-    actuals = fetch_actuals(account_id, meta)
+
+def _candidate_adsets(state: StateFile, actuals: dict, campaign_json: dict) -> list[dict]:
     report = diff_state(state, actuals)
+    declared_campaigns = {campaign["name"] for campaign in campaign_json.get("campaigns", [])}
+    candidates: list[dict] = []
 
-    candidates = [
-        item for item in report.items
-        if item.drift_type == DriftType.MISSING_FROM_STATE and item.object_type == "adset"
-    ]
-    if name_filter:
-        candidates = [a for a in candidates if a.name in name_filter]
+    for item in report.items:
+        if item.drift_type != DriftType.MISSING_FROM_STATE or item.object_type != "adset":
+            continue
 
-    if not candidates:
-        return [TextContent(type="text", text="No untracked ad sets found — nothing to import.")]
-
-    campaign_json = load_campaign_json(json_path)
-    campaigns_by_name = {c["name"]: i for i, c in enumerate(campaign_json["campaigns"])}
-
-    imported, skipped = [], []
-    for item in candidates:
-        parent = next(
-            (cname for cname, cdata in actuals.items() if item.name in cdata.get("ad_sets", {})),
-            None,
-        )
-        if parent is None or parent not in campaigns_by_name:
-            skipped.append(item.name)
+        parent = _find_parent_campaign(actuals, item.name)
+        if parent is None or parent not in declared_campaigns:
             continue
 
         live = actuals[parent]["ad_sets"][item.name]
-        adset_entry: dict = {"name": item.name, "status": live.get("status", "PAUSED"), "ads": []}
-        for field in ("daily_budget", "lifetime_budget", "billing_event", "optimization_goal",
-                      "bid_strategy", "bid_amount", "start_time", "end_time", "targeting"):
+        candidates.append(
+            {
+                "resource_type": "adset",
+                "name": item.name,
+                "parent_campaign": parent,
+                "fb_id": item.fb_id,
+                "status": live.get("status"),
+            }
+        )
+
+    return candidates
+
+
+async def _search_import_candidates(args: dict) -> list[TextContent]:
+    if args.get("resource_type") not in SUPPORTED_IMPORT_RESOURCE_TYPES:
+        return _unsupported_resource_message()
+
+    campaign_json = _resolve_campaign_json()
+    meta = _get_meta_client()
+    state = _load_state(campaign_json["account_id"])
+    actuals = fetch_actuals(campaign_json["account_id"], meta)
+    candidates = _candidate_adsets(state, actuals, campaign_json)
+
+    result = {
+        "resource_type": "adset",
+        "count": len(candidates),
+        "candidates": candidates,
+    }
+    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+
+async def _import_resource(args: dict) -> list[TextContent]:
+    if args.get("resource_type") not in SUPPORTED_IMPORT_RESOURCE_TYPES:
+        return _unsupported_resource_message()
+
+    json_path, _, account_id = _require_stack_config()
+    name_filter = set(args["names"]) if args.get("names") else None
+
+    meta = _get_meta_client()
+    state = _load_state(account_id)
+    actuals = fetch_actuals(account_id, meta)
+    campaign_json = load_campaign_json(str(json_path))
+    candidates = _candidate_adsets(state, actuals, campaign_json)
+    if name_filter:
+        candidates = [candidate for candidate in candidates if candidate["name"] in name_filter]
+
+    if not candidates:
+        return [TextContent(type="text", text="No supported untracked resources found - nothing to import.")]
+
+    campaigns_by_name = {campaign["name"]: i for i, campaign in enumerate(campaign_json["campaigns"])}
+    imported = []
+
+    for candidate in candidates:
+        parent = candidate["parent_campaign"]
+        live = actuals[parent]["ad_sets"][candidate["name"]]
+        adset_entry: dict = {"name": candidate["name"], "status": live.get("status", "PAUSED"), "ads": []}
+
+        for field in (
+            "daily_budget",
+            "lifetime_budget",
+            "billing_event",
+            "optimization_goal",
+            "bid_strategy",
+            "bid_amount",
+            "start_time",
+            "end_time",
+            "targeting",
+        ):
             if live.get(field) is None:
                 continue
-            val = _to_plain(live[field])
-            if field in ("daily_budget", "lifetime_budget", "bid_amount") and val != "":
+
+            value = _to_plain(live[field])
+            if field in ("daily_budget", "lifetime_budget", "bid_amount") and value != "":
                 try:
-                    val = int(val)
+                    value = int(value)
                 except (TypeError, ValueError):
                     pass
-            if field in ("daily_budget", "lifetime_budget") and val == 0:
+            if field in ("daily_budget", "lifetime_budget") and value == 0:
                 continue
-            adset_entry[field] = val
+            adset_entry[field] = value
 
-        idx = campaigns_by_name[parent]
-        campaign_json["campaigns"][idx].setdefault("ad_sets", [])
-        campaign_json["campaigns"][idx]["ad_sets"].append(adset_entry)
+        campaign_idx = campaigns_by_name[parent]
+        campaign_json["campaigns"][campaign_idx].setdefault("ad_sets", [])
+        campaign_json["campaigns"][campaign_idx]["ad_sets"].append(adset_entry)
 
-        params = {k: v for k, v in adset_entry.items() if k != "ads"}
-        state.upsert_adset(parent, item.name, item.fb_id, params)
-        imported.append(f"{parent} / {item.name}  (fb_id: {item.fb_id})")
+        params = {key: value for key, value in adset_entry.items() if key != "ads"}
+        state.upsert_adset(parent, candidate["name"], candidate["fb_id"], params)
+        imported.append(f'{parent} / {candidate["name"]}  (fb_id: {candidate["fb_id"]})')
 
     with open(json_path, "w", encoding="utf-8") as fh:
         json.dump(campaign_json, fh, indent=2, ensure_ascii=False)
     state.save()
 
-    lines = [f"Imported {len(imported)} ad set(s) into {Path(json_path).name} and state:"]
-    for entry in imported:
-        lines.append(f"  + {entry}")
-    if skipped:
-        lines.extend(["", "Skipped (parent campaign not in JSON):"])
-        for s in skipped:
-            lines.append(f"  - {s}")
-    lines.extend(["", "Run plan_campaigns to verify no spurious changes before committing."])
+    lines = [f"Imported {len(imported)} resource(s) into {json_path.name} and state:"]
+    lines.extend(f"  + {entry}" for entry in imported)
+    lines.extend(["", "Run plan_stack to verify no spurious changes before committing."])
     return [TextContent(type="text", text="\n".join(lines))]
-
-
-async def _get_campaign_export(args: dict) -> list[TextContent]:
-    account_id = args["account_id"]
-    meta = _get_meta_client()
-    actuals = fetch_actuals(account_id, meta)
-    return [TextContent(type="text", text=json.dumps(actuals, indent=2))]
-
-
-async def _find_duplicates(args: dict) -> list[TextContent]:
-    account_id = args.get("account_id") or os.environ["FB_ACCOUNT_ID"]
-    meta = _get_meta_client()
-    campaigns = meta.list_campaigns(account_id)
-
-    by_name: dict[str, list[dict]] = {}
-    for c in campaigns:
-        by_name.setdefault(c["name"], []).append({
-            "fb_id": c["id"],
-            "created_time": c.get("created_time", ""),
-            "status": c.get("status", ""),
-        })
-
-    duplicates = {name: entries for name, entries in by_name.items() if len(entries) > 1}
-    result = {
-        "account_id": account_id,
-        "duplicate_count": len(duplicates),
-        "duplicates": duplicates,
-    }
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
 # ------------------------------------------------------------------
@@ -598,28 +523,6 @@ def _load_stack_config(template_path: str) -> None:
     logger.info("Loaded stack config: template=%s account=%s", path.name, _ACCOUNT_ID)
 
 
-def _check_facebook_connection() -> bool:
-    """Attempt a lightweight Facebook API call to verify credentials.
-
-    Returns True on success. Logs the error and returns False on failure.
-    Pass --skip-connection-check to bypass (useful for offline/test use).
-    """
-    try:
-        meta = _get_meta_client()
-        account_id = os.environ.get("FB_ACCOUNT_ID", "")
-        meta.list_campaigns(account_id)
-        logger.info("Facebook connection verified for account=%s", account_id)
-        return True
-    except Exception as exc:
-        logger.error(
-            "Facebook connection check failed: %s — "
-            "verify FB_APP_ID, FB_APP_SECRET, FB_ACCESS_TOKEN, and FB_ACCOUNT_ID in your .env. "
-            "Pass --skip-connection-check to start anyway.",
-            exc,
-        )
-        return False
-
-
 async def _main():
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
@@ -627,15 +530,11 @@ async def _main():
 
 def main():
     import asyncio
-    skip_check = "--skip-connection-check" in sys.argv
 
     if "--config" in sys.argv:
         idx = sys.argv.index("--config")
         if idx + 1 < len(sys.argv):
             _load_stack_config(sys.argv[idx + 1])
-        if not skip_check:
-            if not _check_facebook_connection():
-                raise SystemExit(1)
     else:
         logger.warning(
             "No --config provided. Credentials must be set in environment variables. "

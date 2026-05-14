@@ -40,9 +40,9 @@ See [ADR-008](docs/decisions/008-contractor-service-model.md), [ADR-010](docs/de
 | Desired state | `<stack-name>_template.json` |
 | Credentials | `.env` in the stack directory |
 | State | `state.json` in the stack directory |
-| Plan | `plan_campaigns` output |
-| Apply | `apply_campaigns` |
-| Drift report | `get_drift_report` |
+| Plan | `plan_stack` output |
+| Apply | `apply_stack` |
+| Drift report | `drift_stack` |
 | Provider | `src/api/meta.py` today; more providers are a roadmap item |
 
 Each stack folder is self-contained:
@@ -106,11 +106,9 @@ The Facebook account ID lives in the stack template as `account_id`; it does not
 python src/mcp_server.py --config customers/acme-marketing/acme-marketing_v1/acme-marketing_v1_template.json
 ```
 
-For offline local testing without a Facebook credential check:
+Startup only loads and validates local stack configuration. Provider credentials are used when a provider-backed tool such as `apply_stack`, `drift_stack`, `search_import_candidates`, or `import_resource` runs.
 
-```bash
-python src/mcp_server.py --config customers/acme-marketing/acme-marketing_v1/acme-marketing_v1_template.json --skip-connection-check
-```
+The legacy `--skip-connection-check` flag is accepted for existing local scripts, but startup no longer performs a live Facebook connection check.
 
 ### 4. Plan and apply
 
@@ -126,7 +124,7 @@ Then apply after reviewing the changes:
 Apply this stack.
 ```
 
-If the plan includes deletes, `apply_campaigns` requires `confirm_deletes=true`.
+If the plan includes deletes, `apply_stack` requires `confirm_deletes=true`.
 
 ## Minimal Stack
 
@@ -148,17 +146,15 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 
 | Tool | Description |
 | --- | --- |
-| `plan_campaigns` | Validate the active stack template and show creates, updates, and deletes without changing Facebook. |
-| `apply_campaigns(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require explicit confirmation. |
-| `list_campaigns(account_id?)` | Fetch live campaigns directly from Facebook. |
-| `pause_campaigns(filter?)` | Pause live campaigns matching a name or ID filter. |
-| `get_campaign_status(campaign_id)` | Fetch live fields for one Facebook campaign. |
-| `get_campaign_export(account_id)` | Fetch the full live hierarchy: campaigns, ad sets, and ads. |
-| `get_drift_report` | Compare this stack's local state to live Facebook data. |
-| `import_adsets(adset_names?)` | Adopt untracked Facebook ad sets into the stack template and state. |
-| `find_duplicates(account_id?)` | Find duplicate campaign names in the live account. |
-| `get_local_state(campaign_name?)` | Read this stack's `state.json`; does not call Facebook. |
-| `ingest_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI and flag ambiguities. |
+| `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
+| `validate_stack` | Validate the active stack template without calling Facebook. |
+| `plan_stack` | Validate the active stack and show creates, updates, and deletes without changing Facebook. |
+| `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require explicit confirmation. |
+| `drift_stack` | Compare managed stack state to live Facebook data. Unmanaged account objects are intentionally excluded. |
+| `show_state(campaign_name?)` | Read this stack's `state.json`; does not call Facebook. |
+| `search_import_candidates(resource_type)` | Find unmanaged live resources that belong under campaigns declared in the active stack. Currently supports `resource_type="adset"`. |
+| `import_resource(resource_type, names?)` | Adopt supported live resources into the stack template and state. Currently supports ad sets only. |
+| `generate_stack_from_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI and flag ambiguities. |
 
 ## Architecture
 

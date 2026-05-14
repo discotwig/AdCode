@@ -29,7 +29,7 @@ Realistic actions a user (associate, specialist, or client) might ask AdCode to 
 
 ## Campaign Lifecycle
 
-- [x] **Pause campaigns matching a filter** — "pause everything with 'Black Friday' in the name."
+- [ ] **Pause campaigns matching a filter** — "pause everything with 'Black Friday' in the name."
 - [ ] **Resume (un-pause) campaigns** — reactivate paused campaigns by name, tag, or fb_id.
 - [ ] **Archive campaigns** — move campaigns to archived state once a flight ends.
 - [ ] **Delete campaigns** — remove campaigns and their ad sets/ads from Facebook (currently requires `confirm_deletes=true`).
@@ -39,13 +39,13 @@ Realistic actions a user (associate, specialist, or client) might ask AdCode to 
 
 ## Inspection & Reporting
 
-- [x] **"What's currently live?"** — list all active campaigns on the account with status, budget, and flight dates.
+- [ ] **"What's currently live?"** — list all active campaigns on the account with status, budget, and flight dates.
 - [x] **"What does the system think is live?"** — read the local state file to see what AdCode last pushed, without hitting the API.
-- [x] **Check if a specific campaign is live** — look up a campaign by name or fb_id and return its current status.
-- [x] **Get a drift report** — compare local state to Facebook actuals and surface anything that has changed outside AdCode.
-- [x] **Export the full campaign hierarchy** — return campaigns, ad sets, and ads in a single structured response (currently `get_campaign_export`).
+- [ ] **Check if a specific campaign is live** — look up a campaign by name or fb_id and return its current status.
+- [x] **Get a drift report** — compare managed stack state to Facebook actuals and surface changes to managed objects.
+- [ ] **Export the full campaign hierarchy** — return campaigns, ad sets, and ads in a single structured response.
 - [ ] **Explain what changed since the last push** — summarize the diff between the current JSON and the last applied state.
-- [x] **Find duplicate campaigns** — detect campaigns with identical names created outside AdCode or via double-apply (currently `find_duplicates`).
+- [ ] **Find duplicate campaigns** — detect campaigns with identical names created outside AdCode or via double-apply.
 
 ---
 
@@ -63,7 +63,7 @@ Realistic actions a user (associate, specialist, or client) might ask AdCode to 
 
 - [ ] **Resolve flagged ambiguities in an Excel brief** — client replies to an ambiguity email with answers; system re-extracts and proceeds.
 - [ ] **Override an AI interpretation** — operator corrects an extracted field value before the plan is applied.
-- [x] **Adopt untracked ad sets from Facebook** — import ad sets created directly in Ads Manager into the JSON and state file (`import_adsets`).
+- [x] **Adopt untracked ad sets from Facebook** — search for and import ad sets created directly in Ads Manager into the stack template and state file.
 - [ ] **Handle a malformed Excel** — system returns a structured error listing what is missing or unreadable, rather than silently failing.
 
 ---
@@ -97,14 +97,12 @@ Realistic actions a user (associate, specialist, or client) might ask AdCode to 
 
 | Action | MCP Tool |
 | --- | --- |
-| Ingest Excel brief | `ingest_excel` |
-| Validate + preview plan | `plan_campaigns` |
-| Apply a plan to Facebook | `apply_campaigns` |
-| List live campaigns | `list_campaigns` |
-| Pause campaigns | `pause_campaigns` |
-| Get local state | `get_local_state` |
-| Get campaign status | `get_campaign_status` |
-| Get drift report | `get_drift_report` |
-| Export full hierarchy | `get_campaign_export` |
-| Find duplicates | `find_duplicates` |
-| Adopt untracked ad sets | `import_adsets` |
+| Show active stack config | `show_stack` |
+| Validate stack | `validate_stack` |
+| Preview plan | `plan_stack` |
+| Apply a plan to Facebook | `apply_stack` |
+| Get local state | `show_state` |
+| Get managed drift report | `drift_stack` |
+| Search adoptable live resources | `search_import_candidates` |
+| Adopt supported live resources | `import_resource` |
+| Generate stack from Excel brief | `generate_stack_from_excel` |

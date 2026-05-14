@@ -8,4 +8,4 @@ To try the shape locally, copy the template into a stack folder created by `scri
 python src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json --skip-connection-check
 ```
 
-Then ask your MCP client to run `plan_campaigns`.
+Then ask your MCP client to run `plan_stack`.

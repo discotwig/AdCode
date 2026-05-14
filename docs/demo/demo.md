@@ -2,7 +2,7 @@
 
 A step-by-step walkthrough to demonstrate AdCode to a client. All campaigns are created as `PAUSED` — no ads serve, no budget is spent.
 
-AdCode follows the same model as AWS CloudFormation: **the Ad Stack file is the desired state, and AdCode makes Facebook match it exactly.** Campaigns are created when you add them to the file, updated when you change a field, and deleted when you remove them. `plan_campaigns` is `terraform plan`. `apply_campaigns` is `terraform apply`.
+AdCode follows the same model as AWS CloudFormation: **the Ad Stack file is the desired state, and AdCode makes Facebook match it exactly.** Campaigns are created when you add them to the file, updated when you change a field, and deleted when you remove them. `plan_stack` is `terraform plan`. `apply_stack` is `terraform apply`.
 
 Each Ad Stack (`campaigns/<name>.json`) has its own isolated state file (`state/<name>.json`). Applying one stack can never affect campaigns tracked by another stack — even in the same Facebook account.
 
@@ -158,7 +158,7 @@ Imported 3 ad set(s) into demo_v1.json and state:
   + Test API Campaign 1 / Test API AdSet 1  (fb_id: 23845817916220718)
   + Atlanta Debut / Atlanta Debut  (fb_id: 23845815648140718)
 
-Run plan_campaigns to verify no spurious changes before committing.
+Run plan_stack to verify no spurious changes before committing.
 ```
 
 Then confirm nothing would be pushed:
@@ -197,7 +197,7 @@ Ask Claude:
 
 2. Within ~30 seconds, the operator (`bishopryant@gmail.com`) receives a forwarded email with the validated Ad Stack template attached.
 
-3. Operator downloads the template, saves it to the appropriate customer folder, and runs `apply_campaigns` via the local MCP server.
+3. Operator downloads the template, saves it to the appropriate customer folder, and runs `apply_stack` via the local MCP server.
 
 **Talking point for client:** *"You email us a brief. We validate the template and apply it. Your campaigns are live. You never log into Ads Manager."*
 

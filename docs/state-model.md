@@ -60,7 +60,7 @@ Deletes are planned when an object exists in `state.json` but no longer appears 
 
 Deletes are scoped to the active stack only. Another stack's state file is not loaded, so another stack's campaigns cannot be deleted by this stack's plan.
 
-`apply_campaigns` requires explicit delete confirmation.
+`apply_stack` requires explicit delete confirmation.
 
 ## Editing State
 
@@ -72,7 +72,7 @@ Valid reasons to change state manually are rare:
 - recovering from a failed or interrupted operation;
 - intentionally untracking an object without deleting it from Facebook.
 
-Prefer tool-supported operations like `import_adsets` when adopting live objects into a stack.
+Prefer tool-supported operations like `search_import_candidates` and `import_resource` when adopting supported live objects into a stack.
 
 ## Git
 

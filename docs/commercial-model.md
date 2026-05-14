@@ -52,7 +52,7 @@ The most practical V1 offer is a contractor service:
 1. Client submits a structured campaign template or brief.
 2. The mailroom validates or seeds a template.
 3. The operator saves the template into a stack folder.
-4. The operator runs `plan_campaigns`.
+4. The operator runs `plan_stack`.
 5. The operator reviews and applies the plan.
 6. The operator commits template and state to Git.
 7. The client receives a confirmation summary.

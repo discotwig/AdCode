@@ -2,7 +2,7 @@
 
 The email mailroom is an optional intake adapter for AdCode operators who receive campaign requests by email.
 
-It is not the AdCode execution engine. It does not call Facebook, run `plan_campaigns`, run `apply_campaigns`, or store stack state. It only validates, routes, and seeds templates.
+It is not the AdCode execution engine. It does not call Facebook, run `plan_stack`, run `apply_stack`, or store stack state. It only validates, routes, and seeds templates.
 
 ## Responsibilities
 
@@ -82,5 +82,5 @@ When the operator receives a valid template:
    python src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json
    ```
 
-3. Run `plan_campaigns`, review the output, then apply if correct.
+3. Run `plan_stack`, review the output, then `apply_stack` if correct.
 4. Commit the template and `state.json` together.

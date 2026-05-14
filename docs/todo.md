@@ -457,3 +457,26 @@ Co-locate template and state in a single stack folder, matching Terraform's conv
 - [ ] **Rename** `customers/demo/state/demo_v1.json` → `customers/demo/demo_v1/state.json`
 - [ ] **Delete** `customers/demo/campaigns/` and `customers/demo/state/` directories
 - [ ] **Update** `customers/demo/config.json` — remove `campaigns_dir` and `state_dir`
+
+---
+
+## Phase 21 - Strict IaC MCP Surface (ADR-015)
+
+Reshape the MCP server around stack-scoped infrastructure-as-code operations. Remove broad live account console tools and direct live writes from the public MCP surface.
+
+### Documentation
+
+- [x] **Write ADR-015** - document the strict MCP boundary and removed live account tools
+- [x] **Update README** - replace campaign/live-account tool table with stack-oriented tool names
+
+### Tests
+
+- [x] **Rewrite `tests/test_mcp_server.py`** - assert the new tool list, retired tool removal, stack-scoped drift, import discovery, and ad set import behavior
+
+### Code
+
+- [x] **Rename stack tools** - expose `show_stack`, `validate_stack`, `plan_stack`, `apply_stack`, `drift_stack`, `show_state`, `generate_stack_from_excel`
+- [x] **Remove broad live tools** - remove MCP exposure for pause, live list/status/export, and duplicate search
+- [x] **Replace `import_adsets`** - add `search_import_candidates` and `import_resource(resource_type="adset")`
+- [x] **Tighten drift** - `drift_stack` reports only stack-managed objects
+- [x] **Remove startup live account check** - startup validates local stack config only; provider errors surface when provider-backed tools run

@@ -35,7 +35,7 @@ customers/<slug>/<stack-name>/
 MCP server scoped with --config <stack-name>_template.json
         |
         v
-plan_campaigns
+plan_stack
   - JSON Schema validation
   - AI policy review
   - desired-vs-state diff
@@ -45,7 +45,7 @@ plan_campaigns
 operator review
         |
         v
-apply_campaigns
+apply_stack
   - Meta API create/update/delete
   - state.json update
   - template fb_id persistence
@@ -100,7 +100,7 @@ As a result, stack-scoped tools cannot accidentally read or write another stack'
 
 ## Desired State Flow
 
-`plan_campaigns` loads the active template and local state, then produces a changeset:
+`plan_stack` loads the active template and local state, then produces a changeset:
 
 ```text
 template campaigns
@@ -112,11 +112,11 @@ Create*, Update*, Delete* operations
 
 The planner matches by `fb_id` first and by name second. This allows campaign, ad set, and ad renames without duplicate creation.
 
-Deletes are produced when an object exists in `state.json` but no longer appears in the template. `apply_campaigns` blocks plans containing deletes unless `confirm_deletes=true` is provided.
+Deletes are produced when an object exists in `state.json` but no longer appears in the template. `apply_stack` blocks plans containing deletes unless `confirm_deletes=true` is provided.
 
 ## Apply Flow
 
-`apply_campaigns` executes operations against `MetaClient`:
+`apply_stack` executes operations against `MetaClient`:
 
 1. Create or update campaigns.
 2. Create or update ad sets.
@@ -129,14 +129,13 @@ State writes are atomic: the state service writes a temporary file and renames i
 
 ## Drift Detection
 
-`get_drift_report` fetches the live Facebook hierarchy and compares it to the stack state. It reports:
+`drift_stack` fetches the live Facebook hierarchy and compares it to the managed stack state. It reports:
 
 - `MISSING_FROM_FACEBOOK`: tracked locally but absent from Facebook.
-- `MISSING_FROM_STATE`: present in Facebook but not tracked by this stack.
 - `FIELD_MISMATCH`: present in both, but tracked fields differ.
 - `IN_SYNC`: no tracked difference.
 
-Drift detection intentionally compares state to live Facebook data. It does not treat the template as proof of what is live.
+Drift detection intentionally compares state to live Facebook data. It does not treat the template as proof of what is live, and it does not report unmanaged account objects as drift. Use `search_import_candidates(resource_type="adset")` when you want to discover supported live objects that can be adopted into the stack.
 
 ## Hosted Boundary
 

@@ -18,7 +18,7 @@ The system does not replace Excel as a client collaboration artifact — it clar
 
 **Git as source of truth.** GitHub is the database. Campaign definitions, state files, and the complete history of every change live in the repository. No separate storage layer.
 
-**Idempotent pushes.** Running `push_campaigns` twice with the same input produces the same result. A pre-push diff prevents blind overwrites by surfacing what will change before any API call is made.
+**Idempotent applies.** Running `apply_stack` twice with the same input produces the same result. `plan_stack` prevents blind overwrites by surfacing what will change before any API call is made.
 
 **Desired state reconciliation.** The system can pull current actuals from Facebook and diff them against the local state file. Drift — where Facebook's actual state diverges from what the state file says — is detected, reported, and resolved explicitly rather than silently overwritten.
 
@@ -44,25 +44,27 @@ The email interface sits on top of the MCP server. A bot watches an inbox, accep
 
 **Pre-push drift diff.** Before applying, the system pulls current Facebook actuals and diffs them against the proposed JSON. AI interprets the diff and surfaces intentional drift — cases where Facebook's state diverges from the state file for a known reason — that should not be silently overwritten.
 
-**Post-push reconciliation.** After `push_campaigns` completes, the system pulls actuals again and compares them to the updated state file. AI interprets the raw diff into a human-readable memo. The QA specialist reads the report instead of logging into Facebook.
+**Post-apply reconciliation.** After `apply_stack` completes, the system can pull actuals again and compare them to the updated state file. AI interprets the raw diff into a human-readable memo. The QA specialist reads the report instead of logging into Facebook.
 
-**`get_campaign_json` inspection.** Read-only. Returns raw JSON from state files for a given campaign or account. Used for troubleshooting and data validation — lets users verify what the system believes is true without touching GitHub or the Facebook UI.
+**`show_state` inspection.** Read-only. Returns raw JSON from the active stack state file. Used for troubleshooting and data validation — lets users verify what the system believes is true without touching GitHub or the Facebook UI.
 
 ## MCP Tool Surface
 
 ```
-# Write
-push_campaigns(json)
-pause_campaigns(filter)
+# IaC actions
+show_stack()
+validate_stack()
+plan_stack()
+apply_stack(confirm_deletes?)
+drift_stack()
+show_state(filter?)
 
-# Read / inspection
-get_campaign_json(filter?)
-get_campaign_status(campaign_id)
-get_drift_report(account_id)
+# Controlled import
+search_import_candidates(resource_type)
+import_resource(resource_type, names?)
 
-# Validation / preview
-validate_campaigns(json)
-preview_diff(json)
+# Template generation
+generate_stack_from_excel(excel_path)
 ```
 
 ## V1 Scope
