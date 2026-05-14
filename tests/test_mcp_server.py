@@ -358,6 +358,7 @@ def _import_template():
         "campaigns": [
             {
                 "name": "Parent Campaign",
+                "fb_id": "camp_001",
                 "objective": "REACH",
                 "status": "PAUSED",
                 "special_ad_categories": [],
@@ -365,6 +366,31 @@ def _import_template():
             }
         ],
     }
+
+
+def _list_adsets_under_import_parent():
+    return [
+        {
+            "id": "adset_A",
+            "name": "Ad Set A",
+            "status": "PAUSED",
+            "billing_event": "LINK_CLICKS",
+            "optimization_goal": "LINK_CLICKS",
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "daily_budget": "300",
+            "targeting": {},
+        },
+        {
+            "id": "adset_B",
+            "name": "Ad Set B",
+            "status": "PAUSED",
+            "billing_event": "LINK_CLICKS",
+            "optimization_goal": "LINK_CLICKS",
+            "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+            "daily_budget": "400",
+            "targeting": {},
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -392,11 +418,12 @@ async def test_drift_stack_filters_unmanaged_live_objects(tmp_path):
 async def test_search_import_candidates_only_returns_adsets_under_declared_campaigns(tmp_path):
     state = StateFile("act_123", stack_name="state")
     state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    meta = _make_meta_client()
+    meta.list_adsets.return_value = _list_adsets_under_import_parent()
     stack_patches = _patch_active_stack(tmp_path, _import_template())
     with (
-        patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+        patch("src.mcp_server._get_meta_client", return_value=meta),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        patch("src.mcp_server.fetch_actuals", return_value=_actuals_for_import()),
         stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
     ):
         result = await _search_import_candidates({"resource_type": "adset"})
@@ -405,6 +432,7 @@ async def test_search_import_candidates_only_returns_adsets_under_declared_campa
     assert data["count"] == 2
     assert {item["name"] for item in data["candidates"]} == {"Ad Set A", "Ad Set B"}
     assert "Outside Ad Set" not in result[0].text
+    meta.list_adsets.assert_called_once_with("camp_001")
 
 
 @pytest.mark.asyncio
@@ -417,11 +445,12 @@ async def test_search_import_candidates_rejects_unsupported_type(tmp_path):
 async def test_import_resource_imports_named_adset(tmp_path):
     state = StateFile("act_123", stack_name="state")
     state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    meta = _make_meta_client()
+    meta.list_adsets.return_value = _list_adsets_under_import_parent()
     stack_patches = _patch_active_stack(tmp_path, _import_template())
     with (
-        patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
+        patch("src.mcp_server._get_meta_client", return_value=meta),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        patch("src.mcp_server.fetch_actuals", return_value=_actuals_for_import()),
         stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
     ):
         result = await _import_resource({"resource_type": "adset", "names": ["Ad Set A"]})
@@ -430,6 +459,7 @@ async def test_import_resource_imports_named_adset(tmp_path):
     updated = json.loads((tmp_path / "test_stack_template.json").read_text(encoding="utf-8"))
     adset_names = [adset["name"] for adset in updated["campaigns"][0]["ad_sets"]]
     assert adset_names == ["Ad Set A"]
+    assert updated["campaigns"][0]["ad_sets"][0].get("fb_id") == "adset_A"
     assert state.get_adset_id("Parent Campaign", "Ad Set A") == "adset_A"
 
 

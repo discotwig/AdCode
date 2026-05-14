@@ -145,8 +145,9 @@ async def list_tools() -> list[Tool]:
             name="search_import_candidates",
             description=(
                 "Search for supported live resources that can be adopted into the active stack. "
-                "Currently supports resource_type='adset' and only returns ad sets under campaigns "
-                "declared in the stack template."
+                "Currently supports resource_type='adset'. Returns ad sets live on Facebook under "
+                "each stack campaign that has an fb_id in the template but is not yet listed in that "
+                "campaign's ad_sets (matched by fb_id or name)."
             ),
             inputSchema={
                 "type": "object",
@@ -163,8 +164,9 @@ async def list_tools() -> list[Tool]:
             name="import_resource",
             description=(
                 "Adopt a supported live resource into the active stack template and state file. "
-                "Currently supports resource_type='adset'. This writes local files only and never "
-                "pushes changes to Facebook."
+                "Currently supports resource_type='adset'. Discovers live ad sets via each template "
+                "campaign's fb_id (not Facebook campaign name drift). This writes local files only "
+                "and never pushes changes to Facebook."
             ),
             inputSchema={
                 "type": "object",
@@ -374,37 +376,67 @@ def _to_plain(obj):
     return obj
 
 
-def _find_parent_campaign(actuals: dict, adset_name: str) -> str | None:
-    return next(
-        (cname for cname, cdata in actuals.items() if adset_name in cdata.get("ad_sets", {})),
-        None,
-    )
+_ADSET_IMPORT_FIELDS = (
+    "daily_budget",
+    "lifetime_budget",
+    "billing_event",
+    "optimization_goal",
+    "bid_strategy",
+    "bid_amount",
+    "start_time",
+    "end_time",
+    "targeting",
+)
 
 
-def _candidate_adsets(state: StateFile, actuals: dict, campaign_json: dict) -> list[dict]:
-    report = diff_state(state, actuals)
-    declared_campaigns = {campaign["name"] for campaign in campaign_json.get("campaigns", [])}
+def _adset_entry_from_live(live: dict) -> dict:
+    """Build template/state ad set fields from Facebook Graph ad set fields."""
+    name = live.get("name") or str(live.get("id", ""))
+    entry = {"name": name, "status": live.get("status", "PAUSED"), "ads": [], "fb_id": str(live["id"])}
+    for field in _ADSET_IMPORT_FIELDS:
+        if live.get(field) is None:
+            continue
+        value = _to_plain(live[field])
+        if field in ("daily_budget", "lifetime_budget", "bid_amount") and value != "":
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                pass
+        if field in ("daily_budget", "lifetime_budget") and value == 0:
+            continue
+        entry[field] = value
+    return entry
+
+
+def _missing_template_adsets(meta: MetaClient, campaign_json: dict) -> list[dict]:
+    """Live ad sets under template campaigns (by campaign fb_id) missing from the template."""
     candidates: list[dict] = []
-
-    for item in report.items:
-        if item.drift_type != DriftType.MISSING_FROM_STATE or item.object_type != "adset":
+    for campaign in campaign_json.get("campaigns", []):
+        cid = campaign.get("fb_id")
+        if not cid:
             continue
-
-        parent = _find_parent_campaign(actuals, item.name)
-        if parent is None or parent not in declared_campaigns:
-            continue
-
-        live = actuals[parent]["ad_sets"][item.name]
-        candidates.append(
-            {
-                "resource_type": "adset",
-                "name": item.name,
-                "parent_campaign": parent,
-                "fb_id": item.fb_id,
-                "status": live.get("status"),
-            }
-        )
-
+        parent_name = campaign["name"]
+        template_adsets = campaign.get("ad_sets", [])
+        known_ids = {str(a["fb_id"]) for a in template_adsets if a.get("fb_id")}
+        known_names = {a["name"] for a in template_adsets}
+        for row in meta.list_adsets(cid):
+            plain = _to_plain(dict(row))
+            lid = str(plain.get("id", ""))
+            lname = plain.get("name") or lid
+            if lid in known_ids:
+                continue
+            if lname in known_names:
+                continue
+            candidates.append(
+                {
+                    "resource_type": "adset",
+                    "name": lname,
+                    "parent_campaign": parent_name,
+                    "fb_id": lid,
+                    "status": plain.get("status"),
+                    "live": plain,
+                }
+            )
     return candidates
 
 
@@ -414,14 +446,12 @@ async def _search_import_candidates(args: dict) -> list[TextContent]:
 
     campaign_json = _resolve_campaign_json()
     meta = _get_meta_client()
-    state = _load_state(campaign_json["account_id"])
-    actuals = fetch_actuals(campaign_json["account_id"], meta)
-    candidates = _candidate_adsets(state, actuals, campaign_json)
+    candidates = _missing_template_adsets(meta, campaign_json)
 
     result = {
         "resource_type": "adset",
         "count": len(candidates),
-        "candidates": candidates,
+        "candidates": [{k: v for k, v in c.items() if k != "live"} for c in candidates],
     }
     return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
@@ -435,9 +465,8 @@ async def _import_resource(args: dict) -> list[TextContent]:
 
     meta = _get_meta_client()
     state = _load_state(account_id)
-    actuals = fetch_actuals(account_id, meta)
     campaign_json = load_campaign_json(str(json_path))
-    candidates = _candidate_adsets(state, actuals, campaign_json)
+    candidates = _missing_template_adsets(meta, campaign_json)
     if name_filter:
         candidates = [candidate for candidate in candidates if candidate["name"] in name_filter]
 
@@ -449,39 +478,14 @@ async def _import_resource(args: dict) -> list[TextContent]:
 
     for candidate in candidates:
         parent = candidate["parent_campaign"]
-        live = actuals[parent]["ad_sets"][candidate["name"]]
-        adset_entry: dict = {"name": candidate["name"], "status": live.get("status", "PAUSED"), "ads": []}
-
-        for field in (
-            "daily_budget",
-            "lifetime_budget",
-            "billing_event",
-            "optimization_goal",
-            "bid_strategy",
-            "bid_amount",
-            "start_time",
-            "end_time",
-            "targeting",
-        ):
-            if live.get(field) is None:
-                continue
-
-            value = _to_plain(live[field])
-            if field in ("daily_budget", "lifetime_budget", "bid_amount") and value != "":
-                try:
-                    value = int(value)
-                except (TypeError, ValueError):
-                    pass
-            if field in ("daily_budget", "lifetime_budget") and value == 0:
-                continue
-            adset_entry[field] = value
+        adset_entry = _adset_entry_from_live(candidate["live"])
 
         campaign_idx = campaigns_by_name[parent]
         campaign_json["campaigns"][campaign_idx].setdefault("ad_sets", [])
         campaign_json["campaigns"][campaign_idx]["ad_sets"].append(adset_entry)
 
-        params = {key: value for key, value in adset_entry.items() if key != "ads"}
-        state.upsert_adset(parent, candidate["name"], candidate["fb_id"], params)
+        params = {key: value for key, value in adset_entry.items() if key not in ("ads", "fb_id")}
+        state.upsert_adset(parent, adset_entry["name"], candidate["fb_id"], params)
         imported.append(f'{parent} / {candidate["name"]}  (fb_id: {candidate["fb_id"]})')
 
     with open(json_path, "w", encoding="utf-8") as fh:

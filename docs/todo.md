@@ -480,3 +480,9 @@ Reshape the MCP server around stack-scoped infrastructure-as-code operations. Re
 - [x] **Replace `import_adsets`** - add `search_import_candidates` and `import_resource(resource_type="adset")`
 - [x] **Tighten drift** - `drift_stack` reports only stack-managed objects
 - [x] **Remove startup live account check** - startup validates local stack config only; provider errors surface when provider-backed tools run
+
+### Bug logged — MCP ad set import discovery (fixed)
+
+- **Issue:** `search_import_candidates` and `import_resource` discovered candidates only through `diff_state` / `fetch_actuals`, where the live hierarchy is keyed by **Facebook campaign `name`**. When the template’s campaign name and Graph `name` diverged for the same **`fb_id`** (rename drift), live ad sets under that campaign did not surface as import candidates.
+- **Expected behaviour:** Any ad set returned by `GET …/{campaign_fb_id}/adsets` for a template campaign that declares `fb_id` should be importable if missing from that campaign’s `ad_sets` in the template (match by ad set `fb_id` or `name`).
+- **Fix:** Candidate discovery calls `MetaClient.list_adsets(campaign_fb_id)` per tracked campaign and diffs against the template; imported rows include `fb_id`. Code: `_missing_template_adsets`, `_adset_entry_from_live` in `src/mcp_server.py`; tests updated in `tests/test_mcp_server.py`.
