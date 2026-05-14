@@ -1,9 +1,9 @@
 /**
- * Cloudflare Email Worker — receives inbound email at traffic@ryanbishop.me
+ * Cloudflare Email Worker — receives inbound email at traffic@example.com
  * and forwards it to the AdCode webhook server.
  *
  * Environment variables (set via Cloudflare dashboard or wrangler secret):
- *   WEBHOOK_URL    — e.g. https://api.ryanbishop.me/inbound
+ *   WEBHOOK_URL    — e.g. https://api.example.com/inbound
  *   WEBHOOK_SECRET — shared secret checked by the Python server
  *
  * Deploy: wrangler deploy integrations/email_mailroom/worker.js

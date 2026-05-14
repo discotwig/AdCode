@@ -4,6 +4,9 @@
 # Customer workspaces contain local stack templates, state, and credentials.
 customers/
 
+# Local AI assistant configuration
+.claude/
+
 # State lock files (state JSON files are committed; lock files are not)
 state/*.lock
 

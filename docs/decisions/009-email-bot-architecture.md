@@ -28,15 +28,15 @@ Rejected. Workflow orchestration tools add a third-party dependency in the criti
 **Inbound:** Cloudflare Email Routing + Email Workers  
 **Outbound:** Resend API  
 **Hosting:** Fly.io (always-on, 256 MB shared VM)  
-**Domain:** `ryanbishop.me` (already on Cloudflare)
+**Domain:** `example.com` (placeholder public example)
 
 ### Inbound flow
 
 ```
-Client email → traffic@ryanbishop.me
+Client email → traffic@example.com
   → Cloudflare Email Routing (MX records)
-  → Email Worker (adcode-inbound)
-  → POST https://api.ryanbishop.me/inbound
+  → Email Worker (adcode-inbound-example)
+  → POST https://api.example.com/inbound
   → FastAPI on Fly.io
 ```
 
@@ -44,13 +44,13 @@ The Email Worker is a single JS file (`src/workers/inbound.js`) with no build st
 
 ### Outbound
 
-Resend sends all outbound from `traffic@ryanbishop.me`. Domain is verified via SPF/DKIM records in Cloudflare DNS. Single `send_email()` call wraps the Resend SDK.
+Resend sends all outbound from `traffic@example.com`. Domain is verified via SPF/DKIM records in Cloudflare DNS. Single `send_email()` call wraps the Resend SDK.
 
 ### Hosting
 
 Fly.io runs `uvicorn src.email_bot:app` on port 8080. A persistent volume (`adcode_data`) is mounted at `/app/customers` so state files survive redeploys. An `entrypoint.sh` syncs `config.json` files from the Docker image into the volume on every boot, so config changes deployed via `flyctl deploy` take effect without manual volume editing.
 
-Cloudflare DNS routes `api.ryanbishop.me` (A/AAAA records) directly to Fly.io with TLS handled by Fly's Let's Encrypt certificate. Cloudflare proxy is intentionally disabled on this record to avoid TLS conflicts.
+Cloudflare DNS routes `api.example.com` (A/AAAA records) directly to Fly.io with TLS handled by Fly's Let's Encrypt certificate. Cloudflare proxy is intentionally disabled on this record to avoid TLS conflicts.
 
 ### Operator review gate
 
@@ -66,7 +66,7 @@ Pending briefs are stored as `.pending_{id}.json` files in the customer's `state
 ## Operational notes (learned during deployment)
 
 - **Cloudflare SSL must be set to "Full"** (not Flexible). Flexible causes 520 errors; Strict causes 525 TLS handshake failures on Fly.io.
-- **DNS: Cloudflare proxy must be OFF** for `api.ryanbishop.me`. Use A/AAAA records pointing to Fly.io IPs (not CNAME). Cloudflare proxy conflicts with Fly.io's Let's Encrypt TLS cert.
+- **DNS: Cloudflare proxy must be OFF** for `api.example.com`. Use A/AAAA records pointing to Fly.io IPs (not CNAME). Cloudflare proxy conflicts with Fly.io's Let's Encrypt TLS cert.
 - **Fly.io volume shadows Docker image** — volume at `/app/customers` overwrites the image's `customers/` directory. `entrypoint.sh` copies `config.json` from `customers_defaults/` (baked into image) to the volume on every boot.
 - **Cloudflare "Dropped" status is normal** — when an Email Worker handles an email, Email Routing shows "Dropped". This means the Worker consumed it, not that it was lost. Real signal is Worker logs showing `outcome: ok`.
 - **Worker rejection = Fly.io 500** — if the FastAPI handler throws (e.g. Anthropic 529), Fly.io returns 500 → Worker calls `message.setReject()` → email bounces to sender. Mitigated with `max_retries=6` and explicit 529 catch returning 200.

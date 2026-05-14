@@ -16,6 +16,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 | [013](013-terraform-stack-layout.md) | Stack folder co-locates template and state. |
 | [014](014-stack-level-env.md) | `--config` points to a stack template and loads stack-local `.env`. |
 | [015](015-strict-iac-mcp-surface.md) | MCP exposes stack-scoped IaC tools, not a general live ad account console. |
+| [016](016-public-repo-sanitization.md) | Current tree is sanitized for public visibility without rewriting history. |
 
 ## Historical ADRs
 

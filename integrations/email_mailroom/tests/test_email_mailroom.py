@@ -24,7 +24,7 @@ from integrations.email_mailroom.app import app, _bare_email, _parse_raw_email, 
 def _make_raw_plain(from_addr="anyone@example.com", subject="Test", body="Hello"):
     return textwrap.dedent(f"""\
         From: {from_addr}
-        To: traffic@ryanbishop.me
+        To: traffic@example.com
         Subject: {subject}
         Message-ID: <test123@mail.example.com>
         Content-Type: text/plain; charset=utf-8
@@ -36,7 +36,7 @@ def _make_raw_plain(from_addr="anyone@example.com", subject="Test", body="Hello"
 def _make_raw_with_json_attachment(json_data: dict, from_addr="anyone@example.com", subject="Campaign update"):
     msg = MIMEMultipart()
     msg["From"] = from_addr
-    msg["To"] = "traffic@ryanbishop.me"
+    msg["To"] = "traffic@example.com"
     msg["Subject"] = subject
     msg["Message-ID"] = "<json123@mail.example.com>"
     msg.attach(MIMEText("Please process the attached template.", "plain"))
@@ -50,7 +50,7 @@ def _make_raw_with_json_attachment(json_data: dict, from_addr="anyone@example.co
 def _make_raw_with_xlsx_attachment(xlsx_bytes: bytes, from_addr="anyone@example.com", subject="Brief"):
     msg = MIMEMultipart()
     msg["From"] = from_addr
-    msg["To"] = "traffic@ryanbishop.me"
+    msg["To"] = "traffic@example.com"
     msg["Subject"] = subject
     msg["Message-ID"] = "<xlsx123@mail.example.com>"
     msg.attach(MIMEText("Please create campaigns from the attached brief.", "plain"))
@@ -72,7 +72,7 @@ def _post(client: TestClient, raw: str, from_addr="anyone@example.com") -> dict:
 
 ENV_PATCH = {
     "integrations.email_mailroom.app.OPERATOR_EMAIL": "operator@example.com",
-    "integrations.email_mailroom.app.BOT_EMAIL": "traffic@ryanbishop.me",
+    "integrations.email_mailroom.app.BOT_EMAIL": "traffic@example.com",
     "integrations.email_mailroom.app.RESEND_API_KEY": "re_test_key",
     "integrations.email_mailroom.app.ANTHROPIC_API_KEY": "anth_test_key",
 }

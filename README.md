@@ -130,6 +130,8 @@ If the plan includes deletes, `apply_stack` requires `confirm_deletes=true`.
 
 See [examples/minimal-stack/minimal_stack_template.json](examples/minimal-stack/minimal_stack_template.json) for a complete valid stack.
 
+Public examples use placeholder account and page IDs only. Replace values such as `act_000000000` and `000000000000000` with your own Meta IDs in private stack files.
+
 The shape mirrors the Facebook hierarchy:
 
 ```text
@@ -224,6 +226,8 @@ integrations/
 tests/
 docs/
 ```
+
+`customers/` is intentionally ignored by Git. Use it for private stack templates, `state.json`, `.env` credentials, and customer-specific operating files. Do not commit customer workspaces to the public repository.
 
 ## Optional: Email Intake
 

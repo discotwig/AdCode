@@ -1,4 +1,4 @@
-# AdCode — Build Checklist
+﻿# AdCode — Build Checklist
 
 > Historical build log. This file records implementation phases as they happened, including older layouts that have since been superseded. For the current architecture and stack layout, see `README.md` and `docs/architecture.md`.
 
@@ -243,7 +243,7 @@ Implement the directory layout and server configurability described in ADR-008. 
 - [x] **Define `config.json` format** — schema for per-customer config: `customer_slug`, `account_id`, `campaigns_dir`, `state_dir`; create `schemas/customer_config.schema.json`
 - [x] **Update `mcp_server.py` to accept `--config <path>`** — load `config.json` at startup; derive `campaigns_dir`, `state_dir`, and `account_id` from it; fall back to current env-var defaults when flag is absent (backwards compatible)
 - [x] **Update `StateFile.load` / `save` paths** — accept an explicit base directory so state resolves relative to the customer folder, not the repo root
-- [x] **Create `customers/` directory with `demo/` scaffold** — move `campaigns/demo/` and `state/act_366643171197739.json` under `customers/demo/`; add `customers/demo/config.json` and `customers/demo/.env.example`
+- [x] **Create `customers/` directory with `demo/` scaffold** — move `campaigns/demo/` and `state/act_000000000.json` under `customers/demo/`; add `customers/demo/config.json` and `customers/demo/.env.example`
 - [x] **Update `.gitignore`** — add `customers/*/.env` so per-customer credential files are never committed
 - [x] **Write `scripts/new_customer.py`** — onboarding script: accepts `customer_slug` and `account_id`, creates `customers/{slug}/` directory scaffold, copies `.env.example`, prints next steps
 - [x] **Update README** — replace current setup instructions with customer-centric workflow; document `--config` flag and `new_customer.py`
@@ -255,7 +255,7 @@ Implement the directory layout and server configurability described in ADR-008. 
 
 The client-facing interface for the contractor service model. Clients send media plans by email; the operator receives a plan for review; approved plans are applied to Facebook; clients receive confirmation. See ADR-008 for flow design.
 
-**Architecture:** Cloudflare Email Routing receives inbound mail at `traffic@ryanbishop.me`, an Email Worker POSTs the raw message to `https://api.ryanbishop.me/inbound`, and a FastAPI app on Fly.io handles the pipeline. Resend sends all outbound email.
+**Architecture:** Cloudflare Email Routing receives inbound mail at `traffic@example.com`, an Email Worker POSTs the raw message to `https://api.example.com/inbound`, and a FastAPI app on Fly.io handles the pipeline. Resend sends all outbound email.
 
 ### Inbound handling
 
@@ -292,11 +292,11 @@ The client-facing interface for the contractor service model. Clients send media
 
 ### Deployment (one-time operator steps)
 
-- [x] **Cloudflare Email Routing** — enabled on `ryanbishop.me`; route `traffic@ryanbishop.me` → `adcode-inbound` worker
+- [x] **Cloudflare Email Routing** — enabled on `example.com`; route `traffic@example.com` → `adcode-inbound-example` worker
 - [x] **Deploy Email Worker** — deployed via Cloudflare dashboard; `WEBHOOK_URL` and `WEBHOOK_SECRET` secrets set
-- [x] **Resend domain verification** — `ryanbishop.me` verified; SPF/DKIM/DMARC records in Cloudflare DNS
+- [x] **Resend domain verification** — example sending domain verified; SPF/DKIM/DMARC records in DNS
 - [x] **Fly.io app** — app `adcode` deployed; volume `adcode_data` mounted at `/app/customers`; all secrets set
-- [x] **Cloudflare DNS** — A/AAAA records for `api.ryanbishop.me` pointing to Fly.io; TLS cert issued by Let's Encrypt via `flyctl certs add`
+- [x] **Cloudflare DNS** — A/AAAA records for `api.example.com` pointing to Fly.io; TLS cert issued by Let's Encrypt via `flyctl certs add`
 
 ---
 
@@ -392,8 +392,8 @@ Remove per-sender authentication and per-customer config lookup from the email b
 ### Fly.io secrets to set after deploy
 
 ```
-OPERATOR_EMAIL=bishopryant@gmail.com
-BOT_EMAIL=traffic@ryanbishop.me
+OPERATOR_EMAIL=operator@example.com
+BOT_EMAIL=traffic@example.com
 RESEND_API_KEY=...
 ANTHROPIC_API_KEY=...
 WEBHOOK_SECRET=...
@@ -424,9 +424,9 @@ Shift state files from account-scoped to stack-scoped. Each Ad Stack (`campaigns
 
 ### Demo restructure
 
-- [x] **Move** `customers/demo/campaigns/act_366643171197739/demo_v1.json` → `customers/demo/campaigns/demo_v1.json`
-- [x] **Delete** `customers/demo/campaigns/act_366643171197739/` directory
-- [x] **Rename** `customers/demo/state/act_366643171197739.json` → `customers/demo/state/demo_v1.json`
+- [x] **Move** `customers/demo/campaigns/act_000000000/demo_v1.json` → `customers/demo/campaigns/demo_v1.json`
+- [x] **Delete** `customers/demo/campaigns/act_000000000/` directory
+- [x] **Rename** `customers/demo/state/act_000000000.json` → `customers/demo/state/demo_v1.json`
 
 ---
 
@@ -486,3 +486,26 @@ Reshape the MCP server around stack-scoped infrastructure-as-code operations. Re
 - **Issue:** `search_import_candidates` and `import_resource` discovered candidates only through `diff_state` / `fetch_actuals`, where the live hierarchy is keyed by **Facebook campaign `name`**. When the template’s campaign name and Graph `name` diverged for the same **`fb_id`** (rename drift), live ad sets under that campaign did not surface as import candidates.
 - **Expected behaviour:** Any ad set returned by `GET …/{campaign_fb_id}/adsets` for a template campaign that declares `fb_id` should be importable if missing from that campaign’s `ad_sets` in the template (match by ad set `fb_id` or `name`).
 - **Fix:** Candidate discovery calls `MetaClient.list_adsets(campaign_fb_id)` per tracked campaign and diffs against the template; imported rows include `fb_id`. Code: `_missing_template_adsets`, `_adset_entry_from_live` in `src/mcp_server.py`; tests updated in `tests/test_mcp_server.py`.
+
+---
+
+## Phase 22 - Public Repository Sanitization (ADR-016)
+
+Prepare the current tree for public GitHub visibility without rewriting history.
+
+### Documentation
+
+- [x] **Write ADR-016** - document current-tree sanitization, ignored private workspaces, and placeholder public examples
+- [x] **Update README** - note that `customers/` is intentionally ignored and public examples use placeholder IDs only
+- [x] **Update SECURITY.md** - use the current strict IaC MCP tool names: `plan_stack`, `apply_stack`, and `import_resource`
+
+### Tests
+
+- [x] **Add public-readiness tests** - scan tracked files for personal deployment details, tracked customer workspaces, tracked local AI config, and private credential/state files
+
+### Sanitization
+
+- [x] **Remove tracked local AI config** - delete `.claude/settings.local.json` and ignore `.claude/`
+- [x] **Sanitize mailroom deployment docs** - replace personal email, domain, webhook URL, and Fly app examples with placeholders
+- [x] **Sanitize demo Excel workbooks** - replace real-looking account and page IDs with public placeholders while preserving workbook names and sheets
+- [x] **Verify current tree** - run scans and tests before commit

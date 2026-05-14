@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for adcode on 2026-05-12T13:28:13-04:00
+# fly.toml app configuration file for the example mailroom deployment
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'adcode'
+app = 'adcode-mailroom-example'
 primary_region = 'iad'
 
 [build]

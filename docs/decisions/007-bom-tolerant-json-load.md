@@ -1,4 +1,4 @@
-# ADR-007 — BOM-Tolerant JSON Loading
+﻿# ADR-007 — BOM-Tolerant JSON Loading
 
 **Status:** Accepted  
 **Date:** 2026-05-12
@@ -46,4 +46,4 @@ Remove the BOM from the committed demo file so it validates cleanly without rely
 | File | Change |
 |---|---|
 | `src/traffic.py` | `load_campaign_json`: `encoding="utf-8"` → `encoding="utf-8-sig"` |
-| `campaigns/demo/act_366643171197739/demo_v1.json` | BOM stripped |
+| `campaigns/demo/act_000000000/demo_v1.json` | BOM stripped |

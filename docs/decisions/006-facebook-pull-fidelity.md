@@ -1,4 +1,4 @@
-# ADR-006 — Facebook Pull Fidelity: Budget Coercion, Schedule Fields, and Empty Ads
+﻿# ADR-006 — Facebook Pull Fidelity: Budget Coercion, Schedule Fields, and Empty Ads
 
 **Status:** Accepted  
 **Date:** 2026-05-12
@@ -7,7 +7,7 @@
 
 ## Context
 
-ADR-005 introduced `import_adsets` to adopt untracked ad sets from Facebook into the campaign JSON and state file. When that tool was exercised against a real account (`act_366643171197739`), three gaps in the implementation surfaced:
+ADR-005 introduced `import_adsets` to adopt untracked ad sets from Facebook into the campaign JSON and state file. When that tool was exercised against a test account (`act_000000000`), three gaps in the implementation surfaced:
 
 1. **Budget fields returned as strings.** The Facebook Marketing API returns `daily_budget` and `lifetime_budget` as string values (e.g. `"1000"`, `"3000"`). The AdCode schema declares these as `integer`. The mismatch caused `jsonschema.validate` to reject the imported JSON, making the tool useless against real accounts.
 
@@ -78,5 +78,5 @@ Pass `encoding="utf-8"` to every `open()` call that reads or writes a campaign J
 | `schemas/campaign.schema.json` | `ad_set.optimization_goal`: add `PAGE_LIKES`; `ad_set.ads`: `minItems` 1 → 0 |
 | `tests/test_mcp_server.py` | Load `EXAMPLE_JSON` with `encoding="utf-8"` |
 | `tests/test_schema.py` | Load `example_campaign` fixture with `encoding="utf-8"`; invert `test_empty_ads_array_fails` to assert empty ads is valid |
-| `campaigns/demo/act_366643171197739/demo_v1.json` | Populated with live ad sets from Facebook (three imported ad sets with full field fidelity) |
-| `state/act_366643171197739.json` | Synced to match campaign JSON names and imported ad set params |
+| `campaigns/demo/act_000000000/demo_v1.json` | Populated with live ad sets from Facebook (three imported ad sets with full field fidelity) |
+| `state/act_000000000.json` | Synced to match campaign JSON names and imported ad set params |

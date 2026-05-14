@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 OPERATOR_EMAIL = os.environ.get("OPERATOR_EMAIL", "")
-BOT_EMAIL = os.environ.get("BOT_EMAIL", "traffic@ryanbishop.me")
+BOT_EMAIL = os.environ.get("BOT_EMAIL", "traffic@example.com")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 

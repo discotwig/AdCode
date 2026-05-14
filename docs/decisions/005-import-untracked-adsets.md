@@ -1,4 +1,4 @@
-# ADR-005 — Import Untracked Ad Sets from Facebook
+﻿# ADR-005 — Import Untracked Ad Sets from Facebook
 
 **Status:** Accepted  
 **Date:** 2026-05-11
@@ -42,7 +42,7 @@ The tool is **read-then-write**: no Facebook mutations, only local file changes.
 
 | Parameter | Required | Description |
 |---|---|---|
-| `account_id` | yes | Ad account (e.g. `act_366643171197739`) |
+| `account_id` | yes | Ad account (e.g. `act_000000000`) |
 | `json_path` | yes | Path to the campaign JSON file to update |
 | `adset_names` | no | Subset of ad set names to import; imports all `MISSING_FROM_STATE` if omitted |
 
