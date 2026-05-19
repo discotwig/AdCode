@@ -272,14 +272,16 @@ async def _show_stack(args: dict) -> list[TextContent]:
 
 
 async def _validate_stack(args: dict) -> list[TextContent]:
+    json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client())
+    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
     return [TextContent(type="text", text=validation.summary())]
 
 
 async def _plan_stack(args: dict) -> list[TextContent]:
+    json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client())
+    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
 
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, None)
@@ -289,8 +291,9 @@ async def _plan_stack(args: dict) -> list[TextContent]:
 
 
 async def _apply_stack(args: dict) -> list[TextContent]:
+    json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client())
+    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
 
     if not validation.is_pushable:
         return [TextContent(type="text", text=f"Blocked by validation.\n\n{validation.summary()}")]

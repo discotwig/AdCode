@@ -1,0 +1,11 @@
+{
+  "id": "spend-cap-required",
+  "description": "Campaigns should declare a lifetime spend cap to prevent runaway spend if the campaign runs longer than intended.",
+  "severity": "WARNING",
+  "condition": {
+    "scope": "campaign",
+    "type": "field_required",
+    "field": "spend_cap",
+    "message": "Campaign '{name}' has no spend_cap — consider adding one (in cents) to limit total lifetime spend."
+  }
+}

@@ -1,7 +1,7 @@
 # ADR-017: Feature Roadmap — Governance, Reporting, and IaC Maturity
 
 **Date:** 2026-05-18  
-**Status:** Accepted
+**Status:** Accepted — Phase 23 (Policy as Code) in progress
 
 ---
 

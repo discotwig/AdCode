@@ -1,0 +1,11 @@
+{
+  "id": "broadmatch-targeting",
+  "description": "Ad sets should have at least one audience constraint (interests, behaviors, or custom audiences) to avoid serving to all available inventory.",
+  "severity": "WARNING",
+  "condition": {
+    "scope": "ad_set",
+    "type": "any_field_nonempty",
+    "fields": ["targeting.interests", "targeting.behaviors", "targeting.custom_audiences"],
+    "message": "Ad set '{name}' has no audience constraints — all available ad inventory will be targeted (broadmatch). Add interests, behaviors, or custom audiences to narrow reach."
+  }
+}

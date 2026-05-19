@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AdCode Policy Rule",
+  "description": "A declarative policy rule evaluated at validate_stack and plan_stack time.",
+  "type": "object",
+  "required": ["id", "description", "severity", "condition"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique rule identifier. Stack-local rules with the same id override builtin rules."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this rule checks."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["ERROR", "WARNING"],
+      "description": "ERROR blocks apply_stack. WARNING is advisory only."
+    },
+    "condition": {
+      "type": "object",
+      "required": ["scope", "type"],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": ["campaign", "ad_set"],
+          "description": "Which template object type this condition applies to."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["field_required", "any_field_nonempty", "compatibility_matrix"],
+          "description": "The condition evaluation strategy."
+        },
+        "field": {
+          "type": "string",
+          "description": "For field_required: dot-path to the field that must be present."
+        },
+        "fields": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "For any_field_nonempty: at least one of these dot-paths must be a non-empty list."
+        },
+        "row_field": {
+          "type": "string",
+          "description": "For compatibility_matrix: first field in the tuple. Use 'campaign.' prefix to read from parent campaign."
+        },
+        "col_field": {
+          "type": "string",
+          "description": "For compatibility_matrix: second field in the tuple."
+        },
+        "third_field": {
+          "type": "string",
+          "description": "For compatibility_matrix: third field in the tuple."
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "description": "For compatibility_matrix: list of allowed [row, col, third] value triples."
+        },
+        "message": {
+          "type": "string",
+          "description": "Violation message. '{name}' is replaced with the object name."
+        }
+      }
+    }
+  }
+}

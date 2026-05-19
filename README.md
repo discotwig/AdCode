@@ -149,7 +149,7 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 | Tool | Description |
 | --- | --- |
 | `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
-| `validate_stack` | Validate the active stack template without calling Facebook. |
+| `validate_stack` | Validate the active stack template: JSON Schema, deterministic policy rules (`policies/`), and AI policy review. Does not call Facebook. |
 | `plan_stack` | Validate the active stack and show creates, updates, and deletes without changing Facebook. |
 | `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require explicit confirmation. |
 | `drift_stack` | Compare managed stack state to live Facebook data. Unmanaged account objects are intentionally excluded. |
@@ -208,15 +208,20 @@ customers/
       .env.example
       .env
       state.json
+      policies/             ← optional stack-local policy rules
 examples/
   minimal-stack/
+policies/
+  builtin/                  ← built-in policy rules (versioned with AdCode)
 schemas/
   campaign.schema.json
   state.schema.json
+  policy.schema.json
 src/
   api/meta.py
   services/state.py
   services/validate.py
+  services/policy.py
   services/ingest.py
   traffic.py
   reconcile.py

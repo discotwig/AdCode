@@ -518,35 +518,35 @@ Introduce a declarative rule system evaluated at `validate_stack` and `plan_stac
 
 ### Documentation
 
-- [ ] **Write design doc** — `docs/policy-rules.md`; document rule file format, evaluation order, error vs. warning severity, and how to add custom rules
-- [ ] **Update ADR-017** — mark policy as code as in progress
-- [ ] **Update README** — add `policies/` to repository layout; document `validate_stack` policy evaluation
+- [x] **Write design doc** — `docs/policy-rules.md`; document rule file format, evaluation order, error vs. warning severity, and how to add custom rules
+- [x] **Update ADR-017** — mark policy as code as in progress
+- [x] **Update README** — add `policies/` to repository layout; document `validate_stack` policy evaluation
 
 ### Schema
 
-- [ ] **Create `schemas/policy.schema.json`** — JSON Schema for a policy rule file: `id`, `description`, `severity` (ERROR | WARNING), `condition` (field path + operator + value)
+- [x] **Create `schemas/policy.schema.json`** — JSON Schema for a policy rule file: `id`, `description`, `severity` (ERROR | WARNING), `condition` (field path + operator + value)
 
 ### Code
 
-- [ ] **Create `src/services/policy.py`** — policy rule engine
+- [x] **Create `src/services/policy.py`** — policy rule engine
   - `load_policies(stack_dir: Path) -> list[PolicyRule]` — load all `.json` rule files from `policies/` in the stack directory and any operator-level `policies/` directory; merge and deduplicate by `id`
   - `evaluate(template: dict, rules: list[PolicyRule]) -> list[PolicyViolation]` — evaluate each rule against the template; return violations with `rule_id`, `severity`, `field`, `message`
   - `PolicyRule` dataclass: `id`, `description`, `severity`, `condition`
   - `PolicyViolation` dataclass: `rule_id`, `severity`, `field`, `message`
   - Initial built-in rules: broadmatch detection (ad set with no interests, behaviors, or custom audiences), missing spend cap on campaign, missing `end_time` on ad set, invalid objective/optimization goal combination
-- [ ] **Update `src/services/validate.py`** — call `policy.evaluate()` after schema validation; merge `PolicyViolation` results into `ValidationResult`; ERROR-severity violations set `is_pushable=False`
-- [ ] **Update `src/mcp_server.py`** — surface policy violations in `validate_stack` and `plan_stack` output; format clearly (rule ID, severity, field, message)
+- [x] **Update `src/services/validate.py`** — call `policy.evaluate()` after schema validation; merge `PolicyViolation` results into `ValidationResult`; ERROR-severity violations set `is_pushable=False`
+- [x] **Update `src/mcp_server.py`** — surface policy violations in `validate_stack` and `plan_stack` output; format clearly (rule ID, severity, field, message)
 
 ### Built-in rule library
 
-- [ ] **`policies/builtin/broadmatch.json`** — flag ad sets with no targeting interests, behaviors, or custom audiences
-- [ ] **`policies/builtin/spend-cap-required.json`** — flag campaigns without a `spend_cap`
-- [ ] **`policies/builtin/end-time-required.json`** — flag ad sets without `end_time`
-- [ ] **`policies/builtin/objective-billing-compatibility.json`** — flag invalid objective/billing event/optimization goal combinations
+- [x] **`policies/builtin/broadmatch.json`** — flag ad sets with no targeting interests, behaviors, or custom audiences
+- [x] **`policies/builtin/spend-cap-required.json`** — flag campaigns without a `spend_cap`
+- [x] **`policies/builtin/end-time-required.json`** — flag ad sets without `end_time`
+- [x] **`policies/builtin/objective-billing-compatibility.json`** — flag invalid objective/billing event/optimization goal combinations
 
 ### Tests
 
-- [ ] **`tests/test_policy.py`** — unit tests for `load_policies`, `evaluate`, built-in rules; test ERROR blocks apply, WARNING does not; test custom rule file loaded from stack `policies/` directory
+- [x] **`tests/test_policy.py`** — unit tests for `load_policies`, `evaluate`, built-in rules; test ERROR blocks apply, WARNING does not; test custom rule file loaded from stack `policies/` directory
 
 ---
 

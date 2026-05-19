@@ -1,0 +1,11 @@
+{
+  "id": "end-time-required",
+  "description": "Ad sets should declare an end_time so they stop running automatically at the end of the campaign flight.",
+  "severity": "WARNING",
+  "condition": {
+    "scope": "ad_set",
+    "type": "field_required",
+    "field": "end_time",
+    "message": "Ad set '{name}' has no end_time — the ad set will run indefinitely until paused manually."
+  }
+}

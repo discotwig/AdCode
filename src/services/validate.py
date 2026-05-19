@@ -7,6 +7,7 @@ from pathlib import Path
 import jsonschema
 
 from src.prompts import POLICY_REVIEW
+from src.services.policy import PolicyViolation, evaluate, load_policies
 
 logger = logging.getLogger(__name__)
 
@@ -40,23 +41,32 @@ class PolicyWarning:
 class ValidationResult:
     schema_errors: list[ValidationError] = field(default_factory=list)
     policy_warnings: list[PolicyWarning] = field(default_factory=list)
+    policy_violations: list[PolicyViolation] = field(default_factory=list)
 
     @property
     def is_pushable(self) -> bool:
         if self.schema_errors:
             return False
-        return not any(w.severity == Severity.ERROR for w in self.policy_warnings)
+        if any(w.severity == Severity.ERROR for w in self.policy_warnings):
+            return False
+        if any(v.severity == "ERROR" for v in self.policy_violations):
+            return False
+        return True
 
     def summary(self) -> str:
         lines = []
-        if not self.schema_errors and not self.policy_warnings:
+        if not self.schema_errors and not self.policy_warnings and not self.policy_violations:
             lines.append("Validation passed. No issues found.")
         if self.schema_errors:
             lines.append(f"{len(self.schema_errors)} schema error(s):")
             for e in self.schema_errors:
                 lines.append(f"  [SCHEMA ERROR] {e.field}: {e.message}")
+        if self.policy_violations:
+            lines.append(f"{len(self.policy_violations)} policy rule violation(s):")
+            for v in self.policy_violations:
+                lines.append(f"  [{v.rule_id}] {v.severity} {v.field}: {v.message}")
         if self.policy_warnings:
-            lines.append(f"{len(self.policy_warnings)} policy warning(s):")
+            lines.append(f"{len(self.policy_warnings)} AI policy warning(s):")
             for w in self.policy_warnings:
                 lines.append(f"  [{w.severity}] {w.field}: {w.message}")
                 if w.suggestion:
@@ -105,9 +115,15 @@ def validate_policy(campaign_json: dict, ai_client) -> list[PolicyWarning]:
     return warnings
 
 
-def validate_all(campaign_json: dict, ai_client) -> ValidationResult:
+def validate_all(
+    campaign_json: dict,
+    ai_client,
+    stack_dir: Path | None = None,
+) -> ValidationResult:
     result = ValidationResult()
     result.schema_errors = validate_schema(campaign_json)
     if not result.schema_errors:
+        rules = load_policies(stack_dir)
+        result.policy_violations = evaluate(campaign_json, rules)
         result.policy_warnings = validate_policy(campaign_json, ai_client)
     return result
