@@ -6,6 +6,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 
 | ADR | Summary |
 | --- | --- |
+| [017](017-feature-roadmap.md) | Feature roadmap: policy as code, cost estimation, PR-driven plan/apply, and stack documentation prioritized first. |
 | [004](004-unified-changeset.md) | Plan/apply uses one changeset covering creates, updates, and deletes. Deletes require confirmation. |
 | [005](005-import-untracked-adsets.md) | Import workflow foundation; tool names are superseded by ADR-015. |
 | [006](006-facebook-pull-fidelity.md) | Preserve Facebook-returned values carefully when pulling live data. |
