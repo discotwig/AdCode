@@ -509,3 +509,220 @@ Prepare the current tree for public GitHub visibility without rewriting history.
 - [x] **Sanitize mailroom deployment docs** - replace personal email, domain, webhook URL, and Fly app examples with placeholders
 - [x] **Sanitize demo Excel workbooks** - replace real-looking account and page IDs with public placeholders while preserving workbook names and sheets
 - [x] **Verify current tree** - run scans and tests before commit
+
+---
+
+## Phase 23 — Policy as Code (ADR-017 Tier 1)
+
+Introduce a declarative rule system evaluated at `validate_stack` and `plan_stack` time. Rules are files in a `policies/` directory — versioned, composable, and deterministic. AI policy review remains as a second pass. See ADR-017.
+
+### Documentation
+
+- [ ] **Write design doc** — `docs/policy-rules.md`; document rule file format, evaluation order, error vs. warning severity, and how to add custom rules
+- [ ] **Update ADR-017** — mark policy as code as in progress
+- [ ] **Update README** — add `policies/` to repository layout; document `validate_stack` policy evaluation
+
+### Schema
+
+- [ ] **Create `schemas/policy.schema.json`** — JSON Schema for a policy rule file: `id`, `description`, `severity` (ERROR | WARNING), `condition` (field path + operator + value)
+
+### Code
+
+- [ ] **Create `src/services/policy.py`** — policy rule engine
+  - `load_policies(stack_dir: Path) -> list[PolicyRule]` — load all `.json` rule files from `policies/` in the stack directory and any operator-level `policies/` directory; merge and deduplicate by `id`
+  - `evaluate(template: dict, rules: list[PolicyRule]) -> list[PolicyViolation]` — evaluate each rule against the template; return violations with `rule_id`, `severity`, `field`, `message`
+  - `PolicyRule` dataclass: `id`, `description`, `severity`, `condition`
+  - `PolicyViolation` dataclass: `rule_id`, `severity`, `field`, `message`
+  - Initial built-in rules: broadmatch detection (ad set with no interests, behaviors, or custom audiences), missing spend cap on campaign, missing `end_time` on ad set, invalid objective/optimization goal combination
+- [ ] **Update `src/services/validate.py`** — call `policy.evaluate()` after schema validation; merge `PolicyViolation` results into `ValidationResult`; ERROR-severity violations set `is_pushable=False`
+- [ ] **Update `src/mcp_server.py`** — surface policy violations in `validate_stack` and `plan_stack` output; format clearly (rule ID, severity, field, message)
+
+### Built-in rule library
+
+- [ ] **`policies/builtin/broadmatch.json`** — flag ad sets with no targeting interests, behaviors, or custom audiences
+- [ ] **`policies/builtin/spend-cap-required.json`** — flag campaigns without a `spend_cap`
+- [ ] **`policies/builtin/end-time-required.json`** — flag ad sets without `end_time`
+- [ ] **`policies/builtin/objective-billing-compatibility.json`** — flag invalid objective/billing event/optimization goal combinations
+
+### Tests
+
+- [ ] **`tests/test_policy.py`** — unit tests for `load_policies`, `evaluate`, built-in rules; test ERROR blocks apply, WARNING does not; test custom rule file loaded from stack `policies/` directory
+
+---
+
+## Phase 24 — Cost Estimation (ADR-017 Tier 1)
+
+Surface the declared budget delta as part of plan output. Support an optional account-level budget cap that blocks apply if exceeded. No Facebook API call required — derived entirely from the template. See ADR-017.
+
+### Documentation
+
+- [ ] **Update ADR-017** — mark cost estimation as in progress
+- [ ] **Update README** — document budget cap global variable and cost estimation in plan output
+
+### Code
+
+- [ ] **Create `src/services/budget.py`** — budget estimation
+  - `estimate_delta(plan: Plan, state: StateFile, template: dict) -> BudgetDelta` — compute total declared spend added, removed, and net from the plan changeset
+  - `check_cap(delta: BudgetDelta, cap: float | None) -> CapResult` — compare net total against optional cap; return OK or EXCEEDED with overage amount
+  - `BudgetDelta` dataclass: `added`, `removed`, `net`, `currency`
+  - `CapResult` dataclass: `exceeded: bool`, `cap`, `projected`, `overage`
+- [ ] **Update `src/traffic.py`** — call `budget.estimate_delta()` in `plan()`; attach `BudgetDelta` to `Plan` dataclass
+- [ ] **Update `src/mcp_server.py`** — display budget delta in `plan_stack` output; if a cap is configured and exceeded, surface a blocking warning before `apply_stack` executes
+
+### Global variables (budget cap)
+
+- [ ] **Define `globals.json` format** — `account_budget_cap` (monthly total declared spend limit in account currency), `currency`; stored at the stack directory or operator level
+- [ ] **Create `src/services/globals.py`** — `load_globals(stack_dir: Path) -> Globals`; walk up from stack directory to find the nearest `globals.json`
+- [ ] **Update `src/mcp_server.py`** — load globals at startup; pass cap to `budget.check_cap()` in plan and apply handlers
+
+### Tests
+
+- [ ] **`tests/test_budget.py`** — test `estimate_delta` for creates, updates, deletes; test `check_cap` for under-cap and over-cap cases; test plan output includes delta; test apply blocked when cap exceeded
+
+---
+
+## Phase 25 — PR-Driven Plan/Apply (ADR-017 Tier 1)
+
+Automate `plan_stack` on pull request open and post the output as a PR comment. Merge triggers apply. Implements the Atlantis pattern without changes to the core engine. See ADR-017.
+
+### Documentation
+
+- [ ] **Write `docs/ci-integration.md`** — how to wire up the GitHub Actions workflow; required secrets (`FB_APP_ID`, `FB_APP_SECRET`, `FB_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`); expected PR comment format
+- [ ] **Update ADR-017** — mark PR-driven plan/apply as in progress
+- [ ] **Update README** — add CI integration section linking to `docs/ci-integration.md`
+
+### Code
+
+- [ ] **Create `.github/workflows/plan.yml`** — trigger on `pull_request` when `**/\*_template.json` changes; check out repo; install dependencies; run `python src/mcp_server.py --config <changed stack path> plan_stack`; post plan output as PR comment via GitHub API
+- [ ] **Create `.github/workflows/apply.yml`** — trigger on `push` to `main` when `**/\*_template.json` changes; run `apply_stack`; commit updated `state.json` back to the branch
+- [ ] **Create `scripts/ci_plan.py`** — CLI wrapper that accepts a stack template path, runs plan, formats output as Markdown, and prints to stdout for capture by the workflow
+- [ ] **Create `scripts/ci_apply.py`** — CLI wrapper that accepts a stack template path, runs apply, exits non-zero on failure
+- [ ] **Update `src/traffic.py`** — ensure plan and apply exit codes are reliable for CI use (0 = success, 1 = failure, 2 = plan has blocking violations)
+
+### Tests
+
+- [ ] **`tests/test_ci_plan.py`** — test `ci_plan.py` output format; test exit codes for clean plan, violations, and engine error
+
+---
+
+## Phase 26 — Stack Documentation / Reporting (ADR-017 Tier 1)
+
+`document_stack` generates a human-readable Markdown summary of the active stack for client-facing review. See ADR-017.
+
+### Documentation
+
+- [ ] **Update ADR-017** — mark stack documentation as in progress
+- [ ] **Update README** — add `document_stack` to MCP tools table
+
+### Code
+
+- [ ] **Create `src/services/document.py`** — stack documentation generator
+  - `generate(template: dict, state: StateFile, violations: list[PolicyViolation], delta: BudgetDelta | None) -> str` — produce a Markdown document with: stack summary (account, last applied, total campaigns), campaign hierarchy table (campaign → ad sets → ads with status and budget), targeting summary per ad set, flight dates, policy results (pass / warnings / errors), and budget delta if available
+  - Format for readability by a non-technical marketing manager — no JSON, no field names, plain English labels
+- [ ] **Update `src/mcp_server.py`** — add `document_stack` MCP tool; call `document.generate()` with active stack template, state, and latest policy results; return Markdown string
+
+### Tests
+
+- [ ] **`tests/test_document.py`** — test output contains expected sections; test targeting summary renders correctly for various ad set configurations; test policy result section shows violations; test graceful output when state is empty
+
+---
+
+## Phase 27 — Schema Linting (ADR-017 Tier 2)
+
+Provider-aware rules beyond JSON Schema: valid objective/optimization goal/billing event combinations, pixel requirements, placement constraints. Deterministic and reproducible. See ADR-017.
+
+### Documentation
+
+- [ ] **Write `docs/schema-linting.md`** — document supported lint rules, how to suppress a rule, and how to contribute new rules
+- [ ] **Update ADR-017** — mark schema linting as in progress
+
+### Code
+
+- [ ] **Create `src/services/lint.py`** — schema linter
+  - `lint(template: dict) -> list[LintError]` — run all lint rules against the template; return structured errors
+  - `LintError` dataclass: `rule_id`, `path` (JSON pointer), `message`, `severity`
+  - Initial rules:
+    - Objective/optimization goal compatibility matrix (e.g. `OUTCOME_SALES` requires `OFFSITE_CONVERSIONS` or `CONVERSIONS`)
+    - Objective/billing event compatibility matrix
+    - Pixel required when objective is `OUTCOME_SALES` or `OUTCOME_LEADS`
+    - `bid_amount` required when `bid_strategy` is `LOWEST_COST_WITH_BID_CAP`
+    - Mutually exclusive budget fields (`daily_budget` and `lifetime_budget` cannot both be set on the same ad set)
+- [ ] **Update `src/services/validate.py`** — call `lint()` before AI policy review; surface `LintError` results in `ValidationResult`; ERROR-severity lint errors set `is_pushable=False`
+- [ ] **Update `src/mcp_server.py`** — include lint errors in `validate_stack` and `plan_stack` output
+
+### Tests
+
+- [ ] **`tests/test_lint.py`** — one test per lint rule: valid config passes, invalid config fails with correct rule ID and path; test `is_pushable` blocked by ERROR lint errors
+
+---
+
+## Phase 28 — Global Variables and Budget Enforcement (ADR-017 Tier 2)
+
+Operator-level `globals.json` supplying shared values injected into stacks at plan time. Complements stack `.env` — globals handle policy-level shared configuration, `.env` handles credentials. See ADR-017.
+
+### Documentation
+
+- [ ] **Create `docs/globals.md`** — document `globals.json` format, resolution order (stack dir → parent dirs), supported variable types, and `${VAR}` interpolation syntax
+- [ ] **Update ADR-017** — mark global variables as in progress
+- [ ] **Update README** — document `globals.json` in repository layout
+
+### Schema
+
+- [ ] **Create `schemas/globals.schema.json`** — JSON Schema for `globals.json`: `account_budget_cap`, `currency`, `default_page_id`, `default_pixel_id`, and a free-form `vars` map for `${VAR}` interpolation
+
+### Code
+
+- [ ] **Extend `src/services/globals.py`** (started in Phase 24) — add `interpolate(template: dict, globals: Globals) -> dict`; replace `${VAR}` tokens in template string values before validation and plan
+- [ ] **Update `src/traffic.py`** — call `globals.interpolate()` on the loaded template before `plan()` runs
+- [ ] **Update `src/mcp_server.py`** — load globals at startup; log which globals file was found; surface interpolation errors clearly
+
+### Tests
+
+- [ ] **`tests/test_globals.py`** — test resolution walk-up finds nearest `globals.json`; test interpolation replaces tokens; test missing variable raises clear error; test budget cap loaded correctly
+
+---
+
+## Phase 29 — Delivery Snapshot (ADR-017 Tier 2)
+
+`delivery_stack` pulls spend, impressions, and delivery status for each managed campaign and compares against declared budget and flight dates. Scoped to managed stack objects only, consistent with ADR-015. See ADR-017.
+
+### Documentation
+
+- [ ] **Update ADR-017** — mark delivery snapshot as in progress; note ADR-015 tension and resolution (stack-scoped reads only)
+- [ ] **Update README** — add `delivery_stack` to MCP tools table
+
+### Code
+
+- [ ] **Extend `src/api/meta.py`** — add `get_campaign_insights(campaign_id: str, date_preset: str) -> dict`; fields: `spend`, `impressions`, `clicks`, `reach`, `cpm`; use `date_preset=lifetime` by default
+- [ ] **Create `src/services/delivery.py`** — delivery snapshot
+  - `snapshot(template: dict, state: StateFile, client: MetaClient) -> DeliveryReport` — for each campaign in state, fetch insights and effective status; compare spend against declared `daily_budget` / `lifetime_budget` and flight dates; classify each campaign as SPENDING, ZERO_SPEND, PAUSED, ERROR, or NOT_STARTED
+  - `DeliveryReport` dataclass: list of `CampaignDelivery` (name, fb_id, status, spend, budget, classification, note)
+- [ ] **Update `src/mcp_server.py`** — add `delivery_stack` MCP tool; call `delivery.snapshot()`; format as a table with clear status indicators
+
+### Tests
+
+- [ ] **`tests/test_delivery.py`** — test each classification case; test campaigns not yet in state are excluded; test `get_campaign_insights` mock returns correct field mapping
+
+---
+
+## Phase 30 — Scheduled Drift Monitoring (ADR-017 Tier 2)
+
+Run `drift_stack` on a configurable schedule and notify the operator of out-of-band changes. See ADR-017.
+
+### Documentation
+
+- [ ] **Update ADR-017** — mark scheduled drift monitoring as in progress
+- [ ] **Update `integrations/email_mailroom/README.md`** — document drift monitor deployment alongside the mailroom
+
+### Code
+
+- [ ] **Create `src/services/drift_monitor.py`** — scheduled drift runner
+  - `run_and_notify(config_path: Path, email_client, operator_email: str) -> None` — load stack, run `fetch_actuals()` + `diff_state()`, send email only if drift items exist; include formatted drift report in body
+  - `format_drift_email(report: DriftReport) -> str` — Markdown drift summary suitable for email
+- [ ] **Create `scripts/drift_monitor.py`** — CLI entry point: `python scripts/drift_monitor.py --config <stack>` — runs once; intended to be called by cron or a scheduler
+- [ ] **Update `fly.toml`** — add a cron-style scheduled machine or document `fly machine run --schedule` invocation for drift monitor
+- [ ] **Update `integrations/email_mailroom/README.md`** — document environment variables: `DRIFT_SCHEDULE`, `OPERATOR_EMAIL`
+
+### Tests
+
+- [ ] **`tests/test_drift_monitor.py`** — test notification sent when drift exists; test no email sent when stack is clean; test email format includes drift item details
