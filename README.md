@@ -98,6 +98,11 @@ Required values:
 - `FB_ACCESS_TOKEN`
 - `ANTHROPIC_API_KEY`
 
+Optional values:
+
+- `ACCOUNT_BUDGET_CAP` — total declared spend cap in whole dollars. When set, `plan_stack` shows whether the stack exceeds the cap and `apply_stack` is blocked if it does.
+- `CURRENCY` — ISO 4217 currency code for display (default: `USD`).
+
 The Facebook account ID lives in the stack template as `account_id`; it does not need to be duplicated in `.env`.
 
 ### 3. Start the MCP server
@@ -150,7 +155,7 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 | --- | --- |
 | `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
 | `validate_stack` | Validate the active stack template: JSON Schema, deterministic policy rules (`policies/`), and AI policy review. Does not call Facebook. |
-| `plan_stack` | Validate the active stack and show creates, updates, and deletes without changing Facebook. |
+| `plan_stack` | Validate the active stack and show creates, updates, and deletes without changing Facebook. Includes a budget delta summary and cap check if `ACCOUNT_BUDGET_CAP` is set. |
 | `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require explicit confirmation. |
 | `drift_stack` | Compare managed stack state to live Facebook data. Unmanaged account objects are intentionally excluded. |
 | `show_state(campaign_name?)` | Read this stack's `state.json`; does not call Facebook. |

@@ -556,28 +556,28 @@ Surface the declared budget delta as part of plan output. Support an optional ac
 
 ### Documentation
 
-- [ ] **Update ADR-017** — mark cost estimation as in progress
-- [ ] **Update README** — document budget cap global variable and cost estimation in plan output
+- [x] **Update ADR-017** — mark cost estimation as in progress
+- [x] **Update README** — document `ACCOUNT_BUDGET_CAP` / `CURRENCY` env vars and budget delta in plan output
 
 ### Code
 
-- [ ] **Create `src/services/budget.py`** — budget estimation
+- [x] **Create `src/services/budget.py`** — budget estimation
   - `estimate_delta(plan: Plan, state: StateFile, template: dict) -> BudgetDelta` — compute total declared spend added, removed, and net from the plan changeset
-  - `check_cap(delta: BudgetDelta, cap: float | None) -> CapResult` — compare net total against optional cap; return OK or EXCEEDED with overage amount
-  - `BudgetDelta` dataclass: `added`, `removed`, `net`, `currency`
-  - `CapResult` dataclass: `exceeded: bool`, `cap`, `projected`, `overage`
-- [ ] **Update `src/traffic.py`** — call `budget.estimate_delta()` in `plan()`; attach `BudgetDelta` to `Plan` dataclass
-- [ ] **Update `src/mcp_server.py`** — display budget delta in `plan_stack` output; if a cap is configured and exceeded, surface a blocking warning before `apply_stack` executes
+  - `check_cap(delta: BudgetDelta, template: dict, cap: int | None) -> CapResult` — compare projected total against optional cap; return OK or EXCEEDED with overage amount
+  - `BudgetDelta` dataclass: `added`, `removed`, `net` (whole dollars)
+  - `CapResult` dataclass: `exceeded: bool`, `cap`, `projected`, `overage` (whole dollars)
+- [x] **Update `src/traffic.py`** — call `budget.estimate_delta()` in `plan()`; attach `BudgetDelta` to `Plan` dataclass
+- [x] **Update `src/mcp_server.py`** — display budget delta in `plan_stack` output; if a cap is configured and exceeded, surface a blocking warning before `apply_stack` executes
 
-### Global variables (budget cap)
+### Budget cap (stack `.env`)
 
-- [ ] **Define `globals.json` format** — `account_budget_cap` (monthly total declared spend limit in account currency), `currency`; stored at the stack directory or operator level
-- [ ] **Create `src/services/globals.py`** — `load_globals(stack_dir: Path) -> Globals`; walk up from stack directory to find the nearest `globals.json`
-- [ ] **Update `src/mcp_server.py`** — load globals at startup; pass cap to `budget.check_cap()` in plan and apply handlers
+- [x] **`ACCOUNT_BUDGET_CAP`** — optional env var in stack `.env`; whole dollars; blocks apply when projected total exceeds cap
+- [x] **`CURRENCY`** — optional env var; ISO 4217; display only; defaults to USD
+- Note: `globals.json` / `globals.py` deferred to Phase 28 (global variables); budget cap is stack-specific and lives in `.env`
 
 ### Tests
 
-- [ ] **`tests/test_budget.py`** — test `estimate_delta` for creates, updates, deletes; test `check_cap` for under-cap and over-cap cases; test plan output includes delta; test apply blocked when cap exceeded
+- [x] **`tests/test_budget.py`** — test `estimate_delta` for creates, updates, deletes; test `check_cap` for under-cap and over-cap cases; test plan output includes delta; test apply blocked when cap exceeded; 33 tests passing
 
 ---
 

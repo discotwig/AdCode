@@ -19,6 +19,7 @@ from src.api.meta import MetaClient
 from src.reconcile import DriftType, diff_state, fetch_actuals, format_report
 from src.services.ingest import extract_campaigns, format_ambiguity_report, read_excel
 from src.services.state import StateFile
+from src.services.budget import check_cap, format_budget_section
 from src.services.validate import validate_all
 from src.traffic import apply as apply_plan
 from src.traffic import load_campaign_json, plan
@@ -286,8 +287,13 @@ async def _plan_stack(args: dict) -> list[TextContent]:
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, None)
 
+    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    currency = os.environ.get("CURRENCY", "USD")
+    cap_result = check_cap(p.budget_delta, campaign_json, cap)
+    budget_section = format_budget_section(p.budget_delta, cap_result, currency)
+
     diff_section = _format_plan(p) if len(p) > 0 else "No changes - Facebook already matches this configuration."
-    return [TextContent(type="text", text="\n".join([validation.summary(), "", diff_section]))]
+    return [TextContent(type="text", text="\n".join([validation.summary(), "", diff_section, "", budget_section]))]
 
 
 async def _apply_stack(args: dict) -> list[TextContent]:
@@ -301,6 +307,13 @@ async def _apply_stack(args: dict) -> list[TextContent]:
     meta = _get_meta_client()
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, meta)
+
+    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    currency = os.environ.get("CURRENCY", "USD")
+    cap_result = check_cap(p.budget_delta, campaign_json, cap)
+    if cap_result.exceeded:
+        budget_section = format_budget_section(p.budget_delta, cap_result, currency)
+        return [TextContent(type="text", text=f"Blocked by budget cap.\n\n{budget_section}\n\n{validation.summary()}")]
 
     if len(p) == 0:
         return [TextContent(type="text", text=f"No changes detected.\n\n{validation.summary()}")]

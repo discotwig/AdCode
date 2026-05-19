@@ -91,6 +91,7 @@ class DeleteAd:
 @dataclass
 class Plan:
     operations: list = field(default_factory=list)
+    budget_delta: object = None  # BudgetDelta | None — set after plan() builds operations
 
     def __len__(self):
         return len(self.operations)
@@ -319,7 +320,10 @@ def plan(campaign_json: dict, state: StateFile, client: MetaClient) -> Plan:
                 campaign_name=cname, fb_id=cstate["fb_id"],
             ))
 
-    return Plan(operations=create_update_ops + delete_ad_ops + delete_adset_ops + delete_campaign_ops)
+    p = Plan(operations=create_update_ops + delete_ad_ops + delete_adset_ops + delete_campaign_ops)
+    from src.services.budget import estimate_delta
+    p.budget_delta = estimate_delta(p, state, campaign_json)
+    return p
 
 
 def _persist_created_fb_ids(
