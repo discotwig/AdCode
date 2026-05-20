@@ -6,6 +6,8 @@ This directory records design decisions made while AdCode evolved. Some older AD
 
 | ADR | Summary |
 | --- | --- |
+| [019](019-product-pillars.md) | Product pillars: operational safety, speed, governance, explainability, and integration guide feature design. |
+| [018](018-adcode-as-governance-layer.md) | AdCode is a digital advertising governance layer; MCP is the first interface, not the product boundary. |
 | [017](017-feature-roadmap.md) | Feature roadmap: policy as code, cost estimation, PR-driven plan/apply, and stack documentation prioritized first. |
 | [004](004-unified-changeset.md) | Plan/apply uses one changeset covering creates, updates, and deletes. Deletes require confirmation. |
 | [005](005-import-untracked-adsets.md) | Import workflow foundation; tool names are superseded by ADR-015. |

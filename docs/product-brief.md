@@ -8,7 +8,9 @@ The result is slow throughput, error-prone data entry, and a QA process that req
 
 ## Solution Overview
 
-AdCode applies the infrastructure-as-code mental model to ad campaign trafficking. Campaign definitions live as JSON files in a GitHub repository. A script reads the JSON, calls the Facebook Marketing API, and writes a state file with returned IDs back to the repo. The Git history is the audit trail. Pull requests are the review mechanism. No one needs to log into Facebook Ads Manager for routine trafficking or QA.
+AdCode is a digital advertising governance layer that applies the infrastructure-as-code mental model to ad campaign trafficking. Campaign definitions live as JSON files in a GitHub repository. A script reads the JSON, calls the Facebook Marketing API, and writes a state file with returned IDs back to the repo. The Git history is the audit trail. Pull requests are the review mechanism. No one needs to log into Facebook Ads Manager for routine trafficking or QA.
+
+The product is not the MCP server itself. MCP is the first interface to the governance layer because agents can inspect deterministic tool results, summarize plans, explain drift, and guide users through safe workflows. The core value is governed advertising operations: declared state, live reconciliation, plan/apply safety, controlled imports, explicit approvals, and auditable state changes.
 
 The system does not replace Excel as a client collaboration artifact — it clarifies Excel's role. Excel is where clients and account managers communicate campaign intent. JSON is the operational source of truth. The flow is strictly one-directional: Excel informs JSON, never the reverse.
 
@@ -22,19 +24,36 @@ The system does not replace Excel as a client collaboration artifact — it clar
 
 **Desired state reconciliation.** The system can pull current actuals from Facebook and diff them against the local state file. Drift — where Facebook's actual state diverges from what the state file says — is detected, reported, and resolved explicitly rather than silently overwritten.
 
+## Product Pillars
+
+AdCode features are evaluated against five advertising-governance priorities:
+
+| Pillar | Buyer/operator priority | Product implications |
+| --- | --- | --- |
+| Operational Safety | No accidental changes to the wrong account, no unreviewed deletes, predictable campaign changes, and clear approvals. | Registered stacks, account binding, plan/apply, delete gates, production confirmations, and drift checks before mutation. |
+| Speed | Faster campaign trafficking, faster QA, less manual checking in Meta UI, and fewer repetitive steps. | Reusable stack templates, idempotent applies, Excel-to-stack generation, review packets, and AI-assisted summaries of deterministic outputs. |
+| Governance | Clear answers to who changed what, which account was affected, what was approved, and what state was written. | Git history, state files, audit logs, approval records, role/permission hooks, and environment metadata. |
+| Explainability | Clear answers to what will change, why drift exists, what a plan does, what was imported, and which live campaign maps to local state. | Structured plans, drift reports, import summaries, risk summaries, post-apply reconciliation, and AI-readable outputs. |
+| Integration | Works in the AI, Git, agency, and enterprise workflows the organization already uses. | MCP-first tools, interface-independent core engine, PR/CI-friendly outputs, central-deployment readiness, and future gateway compatibility. |
+
+These pillars are a feature-design filter. Strong roadmap items should usually strengthen multiple pillars. Features that do not improve safety, speed, governance, explainability, or integration are likely distractions.
+
 ## Target Users
 
 Digital advertising agency staff: associates who traffic campaigns and specialists who QA them. These users are not technical. They work in Excel, email, and browser-based ad platforms. The system must meet them where they already operate — the primary interface is email, not a CLI or web app.
 
 ## Interface Strategy
 
-The core functionality is exposed as an MCP (Model Context Protocol) server. MCP tools wrap the core scripts and expose them to AI models. The agency already uses Gemini; they bring their own model and attach it to the MCP server rather than learning a new interface.
+The core functionality is exposed first as an MCP (Model Context Protocol) server. MCP tools wrap the core scripts and expose them to AI models. The agency already uses Gemini; they bring their own model and attach it to the MCP server rather than learning a new purpose-built application.
 
-The email interface sits on top of the MCP server. A bot watches an inbox, accepts Excel attachments with natural language instructions in the email body, replies with validation results and approval requests, and dispatches a push report on completion. From the user's perspective, the interface is email. From the system's perspective, it is a model call with the MCP server attached and email transport wrapped around it.
+MCP is the first interface, not the product boundary. The governance engine should remain usable from future interfaces such as CLI, CI/PR workflows, email, a hosted API, or a web review UI. This keeps AdCode compatible with both a local operator workflow and a future organizational workflow where a marketing company embeds AdCode into approved AI clients or an MCP gateway.
+
+The email interface can sit on top of the MCP server. A bot watches an inbox, accepts Excel attachments with natural language instructions in the email body, replies with validation results and approval requests, and dispatches a push report on completion. From the user's perspective, the interface is email. From the system's perspective, it is a model call with AdCode tools attached and email transport wrapped around it.
 
 **Interface build order:**
 1. MCP server + core scripts
-2. Email bot (v2)
+2. Registered-stack workspace model for safer multi-environment operation
+3. Email bot or PR/CI workflow, depending on the strongest adoption path
 
 ## AI Touchpoints
 
@@ -78,6 +97,9 @@ generate_stack_from_excel(excel_path)
 
 ## Out of Scope for V1
 
+- Hosted SaaS deployment
+- Generic MCP gateway/control-plane functionality
+- Full enterprise SSO/RBAC
 - Email bot interface
 - Google Ads integration
 - Web application UI

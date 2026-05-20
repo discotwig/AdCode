@@ -2,7 +2,9 @@
 
 Terraform for digital advertising.
 
-AdCode manages Meta ad campaigns from declarative JSON stacks. It provides plan/apply workflows, stack-local state, drift detection, and MCP tools so AI agents can operate through a deterministic execution layer instead of making ad platform changes directly.
+AdCode is a digital advertising governance layer for Meta Ads. It manages campaigns from declarative JSON stacks and gives AI agents a safe, governed way to operate from approved campaign definitions.
+
+AdCode provides plan/apply workflows, stack-local state, drift detection, and MCP tools so agents can inspect, explain, and request changes through a deterministic execution layer instead of making ad platform changes directly.
 
 Git is the audit trail. Pull requests are the review mechanism. The JSON stack is the desired state, and AdCode makes Facebook match it exactly.
 
@@ -18,6 +20,22 @@ AdCode applies infrastructure-as-code practices to paid media:
 - **Drift detection**: compare managed state to live Facebook data.
 - **Git-backed audit**: commit templates and state together for a durable history.
 - **AI-safe execution**: expose the engine through MCP while keeping changes deterministic and reviewable.
+
+## Product Pillars
+
+AdCode is designed around five advertising-governance priorities:
+
+| Pillar | What AdCode should provide |
+| --- | --- |
+| Operational safety | Prevent wrong-account, wrong-stack, unreviewed, or destructive changes through stack scoping, plan/apply, delete gates, and production confirmations. |
+| Speed | Reduce repetitive trafficking and QA work with reusable stacks, idempotent applies, Excel-to-stack seeding, drift checks, and review packets. |
+| Governance | Preserve who changed what, what was approved, which account was affected, and what state was written through Git history, state files, audit logs, and approval records. |
+| Explainability | Make planned, live, and applied state understandable through structured plans, drift reports, import summaries, risk summaries, and AI-readable outputs. |
+| Integration | Fit into existing AI, Git, agency, and enterprise workflows through MCP-first access and an interface-independent core engine. |
+
+The product story is: give your company's AI agents a safe, governed way to operate Meta Ads from approved campaign definitions. MCP is the first interface, not the product boundary.
+
+See [ADR-018](docs/decisions/018-adcode-as-governance-layer.md) and [ADR-019](docs/decisions/019-product-pillars.md) for the design rationale.
 
 ## Current Model
 
@@ -151,6 +169,8 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 
 ## MCP Tools
 
+For client-specific setup instructions (Claude Code, Claude Desktop, Open WebUI, ChatGPT), see [docs/integrations/](docs/integrations/README.md).
+
 | Tool | Description |
 | --- | --- |
 | `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
@@ -203,6 +223,8 @@ Related design docs:
 - [Roadmap](docs/roadmap.md)
 - [Security policy](SECURITY.md)
 - [Architecture decisions](docs/decisions/README.md)
+- [AdCode as a governance layer](docs/decisions/018-adcode-as-governance-layer.md)
+- [Product pillars](docs/decisions/019-product-pillars.md)
 
 ## Repository Layout
 
