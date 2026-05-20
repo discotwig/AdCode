@@ -169,8 +169,6 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 
 ## MCP Tools
 
-For client-specific setup instructions (Claude Code, Claude Desktop, Open WebUI, ChatGPT), see [docs/integrations/](docs/integrations/README.md).
-
 | Tool | Description |
 | --- | --- |
 | `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
