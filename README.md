@@ -162,6 +162,7 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 | `search_import_candidates(resource_type)` | Find unmanaged live resources that belong under campaigns declared in the active stack. Currently supports `resource_type="adset"`. |
 | `import_resource(resource_type, names?)` | Adopt supported live resources into the stack template and state. Currently supports ad sets only. |
 | `generate_stack_from_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI and flag ambiguities. |
+| `document_stack` | Generate a Campaign Review Packet — a Markdown report for non-technical review showing planned changes, budget impact, policy results, targeting summary, flight dates, and an approval recommendation. Does not call Facebook. |
 
 ## Architecture
 

@@ -199,6 +199,15 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="document_stack",
+            description=(
+                "Generate a Campaign Review Packet — a Markdown report for non-technical review showing "
+                "planned changes, budget impact, policy results, targeting summary, flight dates, and an "
+                "approval recommendation. Does not call Facebook."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
 
@@ -228,6 +237,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _import_resource(arguments)
         if name == "generate_stack_from_excel":
             return await _generate_stack_from_excel(arguments)
+        if name == "document_stack":
+            return await _document_stack(arguments)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as exc:
         logger.exception("Tool %s failed", name)
@@ -375,6 +386,32 @@ async def _generate_stack_from_excel(args: dict) -> list[TextContent]:
     }
     lines = [report, "", "Extracted campaign JSON:", json.dumps(output, indent=2)]
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _document_stack(args: dict) -> list[TextContent]:
+    from src.services.document import generate
+
+    json_path, _, _ = _require_stack_config()
+    campaign_json = _resolve_campaign_json()
+    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
+
+    state = _load_state(campaign_json["account_id"])
+    p = plan(campaign_json, state, None)
+
+    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    currency = os.environ.get("CURRENCY", "USD")
+    cap_result = check_cap(p.budget_delta, campaign_json, cap)
+
+    md = generate(
+        template=campaign_json,
+        state=state,
+        violations=validation.policy_violations,
+        delta=p.budget_delta,
+        plan=p,
+        cap_result=cap_result if cap is not None else None,
+        currency=currency,
+    )
+    return [TextContent(type="text", text=md)]
 
 
 def _unsupported_resource_message() -> list[TextContent]:

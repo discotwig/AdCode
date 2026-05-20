@@ -103,6 +103,7 @@ async def test_list_tools_is_strict_iac_surface():
         "search_import_candidates",
         "import_resource",
         "generate_stack_from_excel",
+        "document_stack",
     }
 
 

@@ -1,0 +1,104 @@
+{
+  "account_id": "act_000000000",
+  "campaigns": [
+    {
+      "name": "Q3 Brand Awareness",
+      "objective": "OUTCOME_AWARENESS",
+      "status": "ACTIVE",
+      "special_ad_categories": [],
+      "daily_budget": 30000,
+      "ad_sets": [
+        {
+          "name": "All US — No Targeting",
+          "status": "ACTIVE",
+          "daily_budget": 30000,
+          "billing_event": "IMPRESSIONS",
+          "optimization_goal": "REACH",
+          "targeting": {
+            "geo_locations": {
+              "countries": ["US"]
+            },
+            "age_min": 18,
+            "age_max": 65
+          },
+          "ads": [
+            {
+              "name": "Brand Video v1",
+              "status": "ACTIVE",
+              "creative": {
+                "name": "Brand Video Creative v1",
+                "object_story_spec": {
+                  "page_id": "REPLACE_WITH_PAGE_ID",
+                  "link_data": {
+                    "message": "Discover who we are.",
+                    "link": "https://example.com/brand",
+                    "name": "Our Story",
+                    "description": "Learn what makes us different.",
+                    "call_to_action": {
+                      "type": "LEARN_MORE",
+                      "value": {
+                        "link": "https://example.com/brand"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Retargeting — Site Visitors",
+      "objective": "OUTCOME_TRAFFIC",
+      "status": "ACTIVE",
+      "special_ad_categories": [],
+      "spend_cap": 50000,
+      "ad_sets": [
+        {
+          "name": "Site Visitors 30d",
+          "status": "ACTIVE",
+          "daily_budget": 15000,
+          "billing_event": "IMPRESSIONS",
+          "optimization_goal": "LINK_CLICKS",
+          "start_time": "2026-06-01T00:00:00Z",
+          "end_time": "2026-09-30T23:59:59Z",
+          "targeting": {
+            "geo_locations": {
+              "countries": ["US"]
+            },
+            "age_min": 25,
+            "age_max": 54,
+            "custom_audiences": [
+              {"id": "23843210000000001", "name": "Website Visitors - 30 Days"}
+            ]
+          },
+          "ads": [
+            {
+              "name": "Retargeting Static v1",
+              "status": "ACTIVE",
+              "creative": {
+                "name": "Retargeting Creative v1",
+                "object_story_spec": {
+                  "page_id": "REPLACE_WITH_PAGE_ID",
+                  "link_data": {
+                    "message": "You were checking us out — come back and save 15%.",
+                    "link": "https://example.com/offer",
+                    "name": "15% Off — Today Only",
+                    "description": "Limited offer for returning visitors.",
+                    "call_to_action": {
+                      "type": "SHOP_NOW",
+                      "value": {
+                        "link": "https://example.com/offer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

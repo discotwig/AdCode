@@ -581,22 +581,96 @@ Surface the declared budget delta as part of plan output. Support an optional ac
 
 ---
 
-## Phase 25 — PR-Driven Plan/Apply (ADR-017 Tier 1)
+## Phase 25 — Campaign Review Packet / Stack Documentation (ADR-017 Tier 1, highest priority)
 
-Automate `plan_stack` on pull request open and post the output as a PR comment. Merge triggers apply. Implements the Atlantis pattern without changes to the core engine. See ADR-017.
+`document_stack` generates a human-readable Markdown review artifact for a non-technical marketing manager, media director, or agency operator. This is the immediate bridge from the OSS engine to the commercial mission: AdCode should not merely produce technical logs; it should produce a buyer-readable proof packet showing what will launch, what it will cost, and whether it passes agency rules.
+
+This phase supersedes the previous ordering where PR-driven plan/apply came next. PR automation remains aligned, but the review artifact is the highest-leverage next step for demos, customer discovery, and early pilots.
+
+### Product requirement
+
+The output should be framed as a **Campaign Review Packet**. It must be readable without JSON knowledge, GitHub knowledge, or terminal context.
+
+The report should answer these questions in plain English:
+
+1. **What is being launched or changed?**
+2. **Is it safe to approve?**
+3. **What policy checks passed, warned, or failed?**
+4. **What budget exposure does this create?**
+5. **Which campaigns/ad sets/ads are affected?**
+6. **What targeting and flight dates will be used?**
+7. **What requires human review before apply?**
+
+### Documentation
+
+- [x] **Update ADR-017** — mark stack documentation / reporting as in progress and note that this phase is being pulled ahead of PR automation to support demos and buyer-visible validation
+- [x] **Update README** — add `document_stack` to MCP tools table and describe it as a Campaign Review Packet generator
+- [x] **Add demo note to README or examples** — document how to run `validate_stack`, `plan_stack`, and `document_stack` together to produce a review packet for a sample campaign; add `examples/contractor-mistakes/` demo stack
+
+### Code
+
+- [x] **Create `src/services/document.py`** — stack documentation generator
+  - `generate(template: dict, state: StateFile, violations: list[PolicyViolation], delta: BudgetDelta | None, plan: Plan | None = None, cap_result: CapResult | None = None, currency: str = "USD") -> str` — produce Markdown formatted for review by a non-technical manager
+  - Avoids JSON, raw field names, internal class names, and developer-centric phrasing
+  - Uses plain-English labels and concise tables
+- [x] **Required report sections**
+  - **Executive summary** — account/stack name, number of campaigns/ad sets/ads, overall approval status
+  - **Approval recommendation** — short plain-English conclusion based on policy errors, warnings, and budget cap status
+  - **Budget impact** — declared added/removed/net budget, projected total if available, cap status, currency, and per-object budget breakdown
+  - **Policy results** — pass/warning/error summary with rule IDs, severity, affected object/path, and plain-English fix guidance
+  - **Campaign hierarchy** — campaign → ad sets → ads with status, objective, budget, and optimization goal
+  - **Targeting summary** — per ad set: geo, interests, behaviors, custom audiences, and broad targeting warning
+  - **Flight dates** — start/end dates and duration; flags missing end dates and flights >90 days
+  - **Planned changes** — creates, updates, deletes summary from plan when available
+  - **Human review checklist** — checklist of items to confirm before apply
+  - **Next action** — fix blocking issues / approve with warnings / proceed to apply
+- [x] **Update `src/mcp_server.py`** — add `document_stack` MCP tool; calls `document.generate()` with template, state, policy violations, budget delta, plan, and cap result; returns Markdown string; no Meta API call required
+- [x] **Create or update demo stack** — `examples/contractor-mistakes/` with broad targeting, missing end date, missing spend cap, and budget cap pressure; includes `README.md` with demo flow and `.env.example`
+
+### Tests
+
+- [x] **`tests/test_document.py`** — 12 tests passing: required sections, policy errors/warnings, budget impact with delta and cap, broad targeting flag, missing end date, graceful empty state, no raw JSON, status BLOCKED/READY, planned changes section
+
+---
+
+## Phase 26 — Demo Package and Customer Discovery Support (commercial validation priority)
+
+Create a small, repeatable demo path that shows AdCode catching real-looking contractor mistakes before spend happens. This phase is intentionally lightweight and should avoid overbuilding SaaS or CI infrastructure.
+
+### Documentation / demo assets
+
+- [ ] **Create a demo walkthrough** — document a 10-minute flow: bad contractor template → `validate_stack` → `plan_stack` → budget impact → `document_stack` Campaign Review Packet
+- [ ] **Create a demo script** — include talk track for agency/media/analytics stakeholders, emphasizing risk reduction and review artifacts rather than internal implementation details
+- [ ] **Create sample review packet output** — checked into examples if sanitized and suitable for OSS; otherwise keep sensitive versions in `private-docs/`
+- [ ] **Create pilot-readiness checklist** — minimal steps needed to run a QA-only pilot without granting Meta write access
+
+### Demo requirements
+
+- [ ] Demo should work without a real Meta account for first conversation
+- [ ] Demo should show at least three concrete issues: targeting risk, missing/unsafe flight date, and budget impact/cap risk
+- [ ] Demo should produce a single review artifact that can be sent to a non-technical reviewer
+- [ ] Demo should make clear that live apply is optional; AdCode can begin as a QA/review layer
+
+---
+
+## Phase 27 — PR-Driven Plan/Apply (ADR-017 Tier 1, defer full automation until pilot demand)
+
+Automate `plan_stack` on pull request open and post the output as a PR comment. Merge can trigger apply later. Implements the Atlantis pattern without changes to the core engine. See ADR-017.
+
+This remains strategically aligned, but full implementation is deferred behind the Campaign Review Packet and initial customer discovery. Agencies may not be ready to approve live Meta applies through GitHub on day one. For demos and early pilots, a manual or local review-packet workflow is sufficient.
 
 ### Documentation
 
 - [ ] **Write `docs/ci-integration.md`** — how to wire up the GitHub Actions workflow; required secrets (`FB_APP_ID`, `FB_APP_SECRET`, `FB_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`); expected PR comment format
-- [ ] **Update ADR-017** — mark PR-driven plan/apply as in progress
+- [ ] **Update ADR-017** — mark PR-driven plan/apply as deferred until review-packet demo and pilot feedback validate workflow demand
 - [ ] **Update README** — add CI integration section linking to `docs/ci-integration.md`
 
 ### Code
 
-- [ ] **Create `.github/workflows/plan.yml`** — trigger on `pull_request` when `**/\*_template.json` changes; check out repo; install dependencies; run `python src/mcp_server.py --config <changed stack path> plan_stack`; post plan output as PR comment via GitHub API
-- [ ] **Create `.github/workflows/apply.yml`** — trigger on `push` to `main` when `**/\*_template.json` changes; run `apply_stack`; commit updated `state.json` back to the branch
-- [ ] **Create `scripts/ci_plan.py`** — CLI wrapper that accepts a stack template path, runs plan, formats output as Markdown, and prints to stdout for capture by the workflow
-- [ ] **Create `scripts/ci_apply.py`** — CLI wrapper that accepts a stack template path, runs apply, exits non-zero on failure
+- [ ] **Create `scripts/ci_plan.py` first** — CLI wrapper that accepts a stack template path, runs plan/document generation, formats output as Markdown, and prints to stdout for capture by a workflow
+- [ ] **Create `.github/workflows/plan.yml` later** — trigger on `pull_request` when `**/*_template.json` changes; check out repo; install dependencies; run `ci_plan.py`; post review packet or plan output as PR comment via GitHub API
+- [ ] **Defer `.github/workflows/apply.yml`** — do not prioritize merge-triggered live apply until at least one real pilot confirms this is desirable and safe
+- [ ] **Create `scripts/ci_apply.py` later** — CLI wrapper that accepts a stack template path, runs apply, exits non-zero on failure
 - [ ] **Update `src/traffic.py`** — ensure plan and apply exit codes are reliable for CI use (0 = success, 1 = failure, 2 = plan has blocking violations)
 
 ### Tests
@@ -605,43 +679,49 @@ Automate `plan_stack` on pull request open and post the output as a PR comment. 
 
 ---
 
-## Phase 26 — Stack Documentation / Reporting (ADR-017 Tier 1)
+## Phase 28 — Delivery Snapshot (ADR-017 Tier 2, high buyer value after review packet)
 
-`document_stack` generates a human-readable Markdown summary of the active stack for client-facing review. See ADR-017.
+`delivery_stack` pulls spend, impressions, and delivery status for each managed campaign and compares against declared budget and flight dates. Scoped to managed stack objects only, consistent with ADR-015. See ADR-017.
+
+This is the most buyer-visible Tier 2 feature because it answers: **is the approved campaign actually running?** Build after the review packet/demo unless a pilot specifically asks for it sooner.
 
 ### Documentation
 
-- [ ] **Update ADR-017** — mark stack documentation as in progress
-- [ ] **Update README** — add `document_stack` to MCP tools table
+- [ ] **Update ADR-017** — mark delivery snapshot as next candidate after Campaign Review Packet; note ADR-015 tension and resolution (stack-scoped reads only)
+- [ ] **Update README** — add `delivery_stack` to MCP tools table
 
 ### Code
 
-- [ ] **Create `src/services/document.py`** — stack documentation generator
-  - `generate(template: dict, state: StateFile, violations: list[PolicyViolation], delta: BudgetDelta | None) -> str` — produce a Markdown document with: stack summary (account, last applied, total campaigns), campaign hierarchy table (campaign → ad sets → ads with status and budget), targeting summary per ad set, flight dates, policy results (pass / warnings / errors), and budget delta if available
-  - Format for readability by a non-technical marketing manager — no JSON, no field names, plain English labels
-- [ ] **Update `src/mcp_server.py`** — add `document_stack` MCP tool; call `document.generate()` with active stack template, state, and latest policy results; return Markdown string
+- [ ] **Extend `src/api/meta.py`** — add `get_campaign_insights(campaign_id: str, date_preset: str) -> dict`; fields: `spend`, `impressions`, `clicks`, `reach`, `cpm`; use `date_preset=lifetime` by default
+- [ ] **Create `src/services/delivery.py`** — delivery snapshot
+  - `snapshot(template: dict, state: StateFile, client: MetaClient) -> DeliveryReport` — for each campaign in state, fetch insights and effective status; compare spend against declared `daily_budget` / `lifetime_budget` and flight dates; classify each campaign as SPENDING, ZERO_SPEND, PAUSED, ERROR, or NOT_STARTED
+  - `DeliveryReport` dataclass: list of `CampaignDelivery` (name, fb_id, status, spend, budget, classification, note)
+- [ ] **Update `src/mcp_server.py`** — add `delivery_stack` MCP tool; call `delivery.snapshot()`; format as a table with clear status indicators
+- [ ] **Consider adding delivery status to Campaign Review Packet** — once implemented, include live delivery status in reports for applied stacks
 
 ### Tests
 
-- [ ] **`tests/test_document.py`** — test output contains expected sections; test targeting summary renders correctly for various ad set configurations; test policy result section shows violations; test graceful output when state is empty
+- [ ] **`tests/test_delivery.py`** — test each classification case; test campaigns not yet in state are excluded; test `get_campaign_insights` mock returns correct field mapping
 
 ---
 
-## Phase 27 — Schema Linting (ADR-017 Tier 2)
+## Phase 29 — Schema Linting (ADR-017 Tier 2, build based on customer pain)
 
 Provider-aware rules beyond JSON Schema: valid objective/optimization goal/billing event combinations, pixel requirements, placement constraints. Deterministic and reproducible. See ADR-017.
+
+This aligns with the governance mission, but should be driven by real pilot feedback so the first lint rules match the mistakes agencies actually need to prevent.
 
 ### Documentation
 
 - [ ] **Write `docs/schema-linting.md`** — document supported lint rules, how to suppress a rule, and how to contribute new rules
-- [ ] **Update ADR-017** — mark schema linting as in progress
+- [ ] **Update ADR-017** — mark schema linting as deferred until customer discovery identifies the highest-value deterministic checks
 
 ### Code
 
 - [ ] **Create `src/services/lint.py`** — schema linter
   - `lint(template: dict) -> list[LintError]` — run all lint rules against the template; return structured errors
   - `LintError` dataclass: `rule_id`, `path` (JSON pointer), `message`, `severity`
-  - Initial rules:
+  - Candidate initial rules:
     - Objective/optimization goal compatibility matrix (e.g. `OUTCOME_SALES` requires `OFFSITE_CONVERSIONS` or `CONVERSIONS`)
     - Objective/billing event compatibility matrix
     - Pixel required when objective is `OUTCOME_SALES` or `OUTCOME_LEADS`
@@ -649,6 +729,7 @@ Provider-aware rules beyond JSON Schema: valid objective/optimization goal/billi
     - Mutually exclusive budget fields (`daily_budget` and `lifetime_budget` cannot both be set on the same ad set)
 - [ ] **Update `src/services/validate.py`** — call `lint()` before AI policy review; surface `LintError` results in `ValidationResult`; ERROR-severity lint errors set `is_pushable=False`
 - [ ] **Update `src/mcp_server.py`** — include lint errors in `validate_stack` and `plan_stack` output
+- [ ] **Feed lint results into Campaign Review Packet** — summarize deterministic configuration errors in plain English
 
 ### Tests
 
@@ -656,14 +737,16 @@ Provider-aware rules beyond JSON Schema: valid objective/optimization goal/billi
 
 ---
 
-## Phase 28 — Global Variables and Budget Enforcement (ADR-017 Tier 2)
+## Phase 30 — Global Variables and Budget Enforcement (ADR-017 Tier 2, scale feature)
 
 Operator-level `globals.json` supplying shared values injected into stacks at plan time. Complements stack `.env` — globals handle policy-level shared configuration, `.env` handles credentials. See ADR-017.
+
+This is useful for multi-client or agency-wide scale, but the Phase 24 stack `.env` budget cap is sufficient for initial demos and pilots.
 
 ### Documentation
 
 - [ ] **Create `docs/globals.md`** — document `globals.json` format, resolution order (stack dir → parent dirs), supported variable types, and `${VAR}` interpolation syntax
-- [ ] **Update ADR-017** — mark global variables as in progress
+- [ ] **Update ADR-017** — mark global variables as a scale feature after pilot validation
 - [ ] **Update README** — document `globals.json` in repository layout
 
 ### Schema
@@ -675,6 +758,7 @@ Operator-level `globals.json` supplying shared values injected into stacks at pl
 - [ ] **Extend `src/services/globals.py`** (started in Phase 24) — add `interpolate(template: dict, globals: Globals) -> dict`; replace `${VAR}` tokens in template string values before validation and plan
 - [ ] **Update `src/traffic.py`** — call `globals.interpolate()` on the loaded template before `plan()` runs
 - [ ] **Update `src/mcp_server.py`** — load globals at startup; log which globals file was found; surface interpolation errors clearly
+- [ ] **Feed resolved global budget cap into Budget Impact Review** — make the final Campaign Review Packet show whether the cap came from stack `.env` or global config
 
 ### Tests
 
@@ -682,36 +766,15 @@ Operator-level `globals.json` supplying shared values injected into stacks at pl
 
 ---
 
-## Phase 29 — Delivery Snapshot (ADR-017 Tier 2)
-
-`delivery_stack` pulls spend, impressions, and delivery status for each managed campaign and compares against declared budget and flight dates. Scoped to managed stack objects only, consistent with ADR-015. See ADR-017.
-
-### Documentation
-
-- [ ] **Update ADR-017** — mark delivery snapshot as in progress; note ADR-015 tension and resolution (stack-scoped reads only)
-- [ ] **Update README** — add `delivery_stack` to MCP tools table
-
-### Code
-
-- [ ] **Extend `src/api/meta.py`** — add `get_campaign_insights(campaign_id: str, date_preset: str) -> dict`; fields: `spend`, `impressions`, `clicks`, `reach`, `cpm`; use `date_preset=lifetime` by default
-- [ ] **Create `src/services/delivery.py`** — delivery snapshot
-  - `snapshot(template: dict, state: StateFile, client: MetaClient) -> DeliveryReport` — for each campaign in state, fetch insights and effective status; compare spend against declared `daily_budget` / `lifetime_budget` and flight dates; classify each campaign as SPENDING, ZERO_SPEND, PAUSED, ERROR, or NOT_STARTED
-  - `DeliveryReport` dataclass: list of `CampaignDelivery` (name, fb_id, status, spend, budget, classification, note)
-- [ ] **Update `src/mcp_server.py`** — add `delivery_stack` MCP tool; call `delivery.snapshot()`; format as a table with clear status indicators
-
-### Tests
-
-- [ ] **`tests/test_delivery.py`** — test each classification case; test campaigns not yet in state are excluded; test `get_campaign_insights` mock returns correct field mapping
-
----
-
-## Phase 30 — Scheduled Drift Monitoring (ADR-017 Tier 2)
+## Phase 31 — Scheduled Drift Monitoring (ADR-017 Tier 2, pilot/support feature)
 
 Run `drift_stack` on a configurable schedule and notify the operator of out-of-band changes. See ADR-017.
 
+This is highly aligned with the governance mission, but is best built after there is a real pilot or support customer who wants an applied stack monitored over time. It is also a natural future paid support/hosted capability.
+
 ### Documentation
 
-- [ ] **Update ADR-017** — mark scheduled drift monitoring as in progress
+- [ ] **Update ADR-017** — mark scheduled drift monitoring as a pilot/support feature
 - [ ] **Update `integrations/email_mailroom/README.md`** — document drift monitor deployment alongside the mailroom
 
 ### Code
@@ -722,6 +785,7 @@ Run `drift_stack` on a configurable schedule and notify the operator of out-of-b
 - [ ] **Create `scripts/drift_monitor.py`** — CLI entry point: `python scripts/drift_monitor.py --config <stack>` — runs once; intended to be called by cron or a scheduler
 - [ ] **Update `fly.toml`** — add a cron-style scheduled machine or document `fly machine run --schedule` invocation for drift monitor
 - [ ] **Update `integrations/email_mailroom/README.md`** — document environment variables: `DRIFT_SCHEDULE`, `OPERATOR_EMAIL`
+- [ ] **Eventually feed drift status into Campaign Review Packet** — for applied stacks, include whether live Facebook matches approved state
 
 ### Tests
 
