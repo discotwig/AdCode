@@ -1,246 +1,251 @@
-# AdCode Demo Guide
+# AdCode Customer Demo Guide
 
-A step-by-step walkthrough for testing and demonstrating AdCode through an MCP client such as Cursor. All demo campaigns should be created as `PAUSED`, so no ads serve and no budget is spent.
+AdCode is an open-source campaign governance and QA layer for agencies that use contractors to traffic paid media campaigns. This guide is for the operator running the demo — either for internal validation or for a buyer conversation with a marketing manager, media director, or agency leader who does not use a terminal or GitHub.
 
-AdCode follows the infrastructure-as-code model: the active Ad Stack file is the desired state, and AdCode makes Facebook match it. `plan_stack` is the equivalent of `terraform plan`; `apply_stack` is the equivalent of `terraform apply`.
+The demo story: a contractor submitted a Meta campaign setup. AdCode catches broad targeting, a missing flight date, and budget exposure before the campaign spends money. The output is a Campaign Review Packet the manager can read, forward, and approve.
 
-The MCP server is scoped to one stack at startup. Prompts should refer to "this stack" or "the active stack" rather than passing file paths into each tool call. This is intentional: the AI can only operate on the stack selected by the local operator.
+---
 
-## Before You Start
+## Part A — 10-Minute Buyer Demo
 
-Start the MCP server with the stack you want to test:
+**No live Meta account required.** This demo runs entirely offline using the `examples/contractor-mistakes/` stack and your Anthropic API key.
+
+### Setup
+
+```bash
+# One-time: copy the env template and fill in ANTHROPIC_API_KEY
+cp examples/contractor-mistakes/.env.example examples/contractor-mistakes/.env
+# Open the file and replace REPLACE_WITH_ANTHROPIC_API_KEY
+# Leave all FB_* values as-is — they are not used in this demo
+
+# Start the MCP server pointed at the demo stack
+python src/mcp_server.py \
+  --config examples/contractor-mistakes/contractor_mistakes.json \
+  --skip-connection-check
+```
+
+**What this stack contains:**
+
+A contractor submitted two campaigns. One is problematic — the other is intentionally clean, to show contrast.
+
+| Campaign | Issue |
+| --- | --- |
+| Q3 Brand Awareness | Ad set "All US — No Targeting": no interests, behaviors, or audiences; no end date; no spend cap on campaign |
+| Retargeting — Site Visitors | Clean: custom audience, end date, spend cap in place |
+
+The account budget cap is set to $400/day. The template declares $450/day total — a cap overage.
+
+---
+
+### Step 1 — Show the active stack
+
+**Prompt:**
+```
+Show me the active AdCode stack.
+```
+
+**Expected output:** Template path, account ID, .env confirmed.
+
+**Talk track:**
+> "The operator starts the server pointed at one stack — the contractor's submission. The AI can only operate on the stack the operator opened. This is not a general ad account console."
+
+---
+
+### Step 2 — Validate the stack
+
+**Prompt:**
+```
+Validate this stack.
+```
+
+**Expected output:** 2 ERRORs (broad targeting, missing end date), 1 WARNING (no spend cap). JSON Schema passes.
+
+**Talk track:**
+> "Policy checks run before anything touches Facebook. AdCode found that one ad set will reach an unconstrained US audience — 18 to 65, all placements, no interests or audiences. It also has no end date. These are the contractor mistakes that go live and spend money before anyone notices."
+
+**Pause here.** Let the buyer read the violations. Ask:
+> "Has something like this happened on your account?"
+
+---
+
+### Step 3 — Plan the stack
+
+**Prompt:**
+```
+Plan this stack and show what it would cost.
+```
+
+**Expected output:** 2 campaign creates + 2 ad set creates, budget delta ($450/day added), cap exceeded warning.
+
+**Talk track:**
+> "Before anything touches Facebook, AdCode shows the exact changeset and the budget exposure. This stack declares $300/day for the broad campaign and $150/day for retargeting — $450 total. That exceeds the $400 account cap. The apply would be blocked automatically. The contractor can't accidentally push this as-is."
+
+---
+
+### Step 4 — Generate the Campaign Review Packet
+
+**Prompt:**
+```
+Generate the Campaign Review Packet for this stack.
+```
+
+**Expected output:** A full Markdown report with status **BLOCKED**, including:
+- Executive Summary (2 campaigns, 2 errors, overall status)
+- Approval Recommendation (plain-English blocking statement)
+- Budget Impact ($450/day declared, cap exceeded by $50)
+- Policy Results (error/warning table with fix guidance)
+- Campaign Hierarchy (campaign → ad set → ad with budgets and objectives)
+- Targeting Summary (broad targeting flag on "All US — No Targeting")
+- Flight Dates (missing end date flagged)
+- Human Review Checklist (4 action items)
+- Next Action (fix blocking issues before apply)
+
+**Talk track:**
+> "This is the artifact. Everything the manager needs to review is in one place — what will launch, what it costs, what failed QA, and a checklist of what has to be fixed before anyone approves apply. No terminal. No JSON. This can be forwarded by email or attached to a PR. The reviewer signs off on this, not on a screenshot from a contractor."
+
+**Point out the Human Review Checklist specifically.** These are the blocking action items.
+
+---
+
+### Closing pitch
+
+After Step 4, deliver this:
+
+> "AdCode can start as QA-only. You don't need to give it write access to Facebook on day one. The first pilot is proving whether this review packet catches mistakes your current process misses — and produces a better approval artifact than screenshots or manual checklists. We can set this up for one client account in two to three weeks."
+
+---
+
+## Part B — Live Meta Demo
+
+**Requires live Meta credentials** in the stack `.env`. Use a customer stack or a test account with real `FB_APP_ID`, `FB_APP_SECRET`, `FB_ACCESS_TOKEN`, and `FB_ACCOUNT_ID`.
+
+Start the server without `--skip-connection-check`:
 
 ```bash
 python src/mcp_server.py --config customers/<slug>/<stack-name>/<stack-name>_template.json
 ```
 
-The stack folder should contain:
+All demo campaigns should be created as `PAUSED` — no ads serve and no budget is spent.
 
-```text
-customers/<slug>/<stack-name>/
-  <stack-name>_template.json
-  .env
-  state.json
+---
+
+### Step 5 — Apply the stack
+
+If the plan has no deletes:
+
 ```
-
-The template contains `account_id`. The `.env` file contains provider and AI credentials. Startup only loads local configuration; Facebook is contacted only when a provider-backed tool runs.
-
-## Test 1: Show The Active Stack
-
-**What it shows:** The MCP server is scoped to the expected stack.
-
-Prompt:
-
-```text
-Show me the active AdCode stack.
-```
-
-**Expected result:** The response shows the active template path, stack directory, state path, account ID, and whether `.env` exists. It must not print credential values.
-
-**Talking point:** The operator chooses the stack at server startup. The AI does not get to browse or choose an arbitrary ad account.
-
-## Test 2: Validate Without Facebook
-
-**What it shows:** Schema and policy checks happen before provider calls.
-
-Prompt:
-
-```text
-Validate this stack.
-```
-
-**Expected result:** The response summarizes JSON Schema validation and AI policy review. No Facebook API call should be required.
-
-**Talking point:** Problems are caught before anything touches the ad platform.
-
-## Test 3: Preview The Plan
-
-**What it shows:** The full changeset before any write.
-
-Prompt:
-
-```text
-Plan this stack and summarize exactly what would change.
-```
-
-**Expected result:** The response shows creates, updates, deletes, or a no-op message.
-
-Example:
-
-```text
-Plan: 4 CreateCampaign, 1 CreateAdSet, 1 CreateAd
-
-  CreateCampaign: AdCode Demo - Brand Awareness
-  CreateAdSet: AdCode Demo - Brand Awareness
-  CreateAd: AdCode Demo - Brand Awareness
-```
-
-**Talking point:** This is the review gate. The operator sees what will happen before Facebook changes.
-
-## Test 4: Apply The Stack
-
-**What it shows:** The reviewed plan is applied to Facebook and local state is updated.
-
-Prompt, if the plan has no deletes:
-
-```text
 Apply this stack.
 ```
 
-Prompt, only if the reviewed plan includes intentional deletes:
+If the plan includes intentional deletes:
 
-```text
+```
 Apply this stack with confirm_deletes=true.
 ```
 
-**Expected result:** The response summarizes applied creates, updates, and deletes. New Facebook IDs are persisted into the template and `state.json`.
+**Expected result:** Creates, updates, and deletes execute in order. New Facebook IDs are written back to the template and `state.json`.
 
-**Talking point:** Applies are deterministic and stateful. Running the same stack again should not create duplicates.
+**Talking point:** Applies are deterministic and stateful. Running the same stack again will not create duplicates.
 
-## Test 5: Confirm Idempotency
+---
 
-**What it shows:** Reapplying unchanged desired state is a no-op.
+### Step 6 — Confirm idempotency
 
-Prompt:
-
-```text
+```
 Plan this stack again and confirm whether anything would change.
 ```
 
-**Expected result:**
+**Expected result:** `No changes detected.` or equivalent.
 
-```text
-No changes detected.
+**Talking point:** The state file lets AdCode distinguish managed objects from new objects. Reapplying the same desired state is always safe.
+
+---
+
+### Step 7 — Inspect local state
+
 ```
-
-or equivalent no-op language.
-
-**Talking point:** The state file lets AdCode distinguish managed objects from new objects.
-
-## Test 6: Inspect Local State
-
-**What it shows:** The stack state can be inspected without calling Facebook.
-
-Prompt:
-
-```text
 Show me the local state for this stack.
 ```
 
-**Expected result:** The response returns tracked campaigns, ad sets, ads, Facebook IDs, and last-pushed params from `state.json`.
+**Expected result:** Tracked campaigns, ad sets, ads, Facebook IDs, and last-pushed params from `state.json`.
 
-**Talking point:** Git plus state gives an audit trail that is available without rate limits or browser access.
+**Talking point:** Git plus state gives an audit trail available without rate limits or browser access.
 
-## Test 7: Check Managed Drift
+---
 
-**What it shows:** AdCode detects when managed objects differ from Facebook.
+### Step 8 — Check managed drift
 
 Optional setup: manually change a managed campaign or ad set in Facebook Ads Manager.
 
-Prompt:
-
-```text
+```
 Check drift for this stack.
 ```
 
-**Expected result:** The response reports missing managed objects or field mismatches. It should not report unrelated campaigns or ad sets elsewhere in the account.
+**Expected result:** Field mismatches or missing managed objects reported. Unrelated campaigns in the account are not mentioned.
 
 Example:
-
-```text
-[FIELD_MISMATCH] CAMPAIGN: AdCode Demo - Brand Awareness
+```
+[FIELD_MISMATCH] CAMPAIGN: Q3 Brand Awareness
     status: expected='PAUSED' actual='ACTIVE'
 ```
 
-**Talking point:** Drift is stack-scoped. The tool is not a general live account scanner.
+**Talking point:** Drift is stack-scoped. It is not a general account scan. AdCode only reports changes to objects it manages.
 
-## Test 8: Search Import Candidates
+---
 
-**What it shows:** The AI can discover supported live resources that belong under campaigns declared in the active stack.
+### Step 9 — Search import candidates
 
-Prompt:
-
-```text
+```
 Search for ad set import candidates for this stack.
 ```
 
-**Expected result:** The response lists unmanaged live ad sets only if they sit under campaigns declared in the active stack template.
+**Expected result:** Unmanaged live ad sets under campaigns declared in the stack template.
 
-**Talking point:** This is the controlled import path. It is useful for adopting objects created manually without turning the MCP server into a broad account console.
+**Talking point:** The controlled import path for adopting manually created objects without turning the MCP server into a broad account console.
 
-## Test 9: Import A Specific Ad Set
+---
 
-**What it shows:** A supported live object can be adopted into the template and state without pushing changes to Facebook.
+### Step 10 — Import a specific ad set
 
-Prompt:
-
-```text
+```
 Import the ad set named "<AD SET NAME>" into this stack.
 ```
 
-**Expected result:** The response says the ad set was imported into the stack template and state. The template now contains the imported ad set with Facebook-returned fields, and `state.json` tracks its `fb_id`.
+**Expected result:** The ad set is added to the template and `state.json` with its Facebook ID. Then:
 
-Then re-plan:
-
-```text
+```
 Plan this stack again and confirm whether the import created any spurious changes.
 ```
 
-**Expected result:** The plan should be clean or limited to intentional differences you can explain.
+**Expected result:** Plan is clean or limited to intentional differences.
 
-**Talking point:** Import is local read-then-write. It does not change Facebook; it brings live objects under source control.
+**Talking point:** Import is a local read-then-write. It does not change Facebook. It brings live objects under source control.
 
-## Test 10: Negative Tool Surface Tests
+---
 
-**What it shows:** The public MCP surface is intentionally not a general ad account console.
+### Step 11 — Negative surface tests
 
-Prompts:
-
-```text
+```
 List all campaigns in the ad account.
 ```
 
-```text
+```
 Pause all campaigns matching Black Friday.
 ```
 
-**Expected result:** The MCP server should not expose old broad live tools such as `list_campaigns`, `get_campaign_status`, `get_campaign_export`, `find_duplicates`, or `pause_campaigns`.
+**Expected result:** Neither command should work. The MCP server does not expose `list_campaigns`, `pause_campaigns`, `get_campaign_status`, or other broad live account tools.
 
-**Talking point:** This is the safety boundary. The contractor can see and change only what the active stack manages, except for narrow import discovery under declared campaigns.
+**Talking point:** This is the safety boundary. The AI operates only on the active stack.
 
-## Optional: Email Intake Demo
-
-The email mailroom is separate from the execution engine. It receives client briefs, validates or seeds templates, and forwards them to the operator. It does not hold Facebook credentials, run `plan_stack`, run `apply_stack`, or store stack state.
-
-Demo flow:
-
-1. Client sends a JSON, Excel, or plain-text brief by email.
-2. The mailroom replies with validation feedback or a starter template.
-3. The operator saves the reviewed template into a stack folder.
-4. The operator starts the MCP server with `--config`.
-5. The operator runs the stack prompts above.
-
-## Cleanup
-
-To tear down a demo stack, remove the campaigns from the active stack template, then run:
-
-```text
-Plan this stack and summarize exactly what would change.
-```
-
-If the delete plan is correct:
-
-```text
-Apply this stack with confirm_deletes=true.
-```
-
-Commit the updated template and `state.json` together after the apply.
+---
 
 ## Key Messages
 
 1. **The stack is the contract.** The AI operates on the active stack, not the whole ad account.
-2. **Plan before apply.** Every provider write should be previewed.
-3. **State prevents duplicates.** Facebook IDs are tracked after apply and import.
-4. **Drift is managed-object drift.** Unrelated live account objects are not part of the stack.
-5. **Import is controlled.** Today, import supports ad sets under declared campaigns.
-6. **The email bot is intake only.** Execution stays in the local stack-scoped MCP server.
+2. **Policy checks run before Facebook does.** Schema validation and agency rules fire against the template.
+3. **Plan before apply.** Every provider write is previewed and must be reviewed.
+4. **State prevents duplicates.** Facebook IDs are tracked after apply and import.
+5. **Drift is managed-object drift.** Unrelated live account objects are never part of the stack.
+6. **Import is controlled.** Adopting unmanaged objects requires an explicit operator step.
+7. **The review packet is the output.** `document_stack` produces a buyer-readable artifact before any campaign spends money.
+8. **AdCode can start as QA-only.** No write access to Facebook is needed for the first pilot.
