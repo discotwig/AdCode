@@ -17,13 +17,13 @@ from mcp.types import TextContent, Tool
 
 from src.api.meta import MetaClient
 from src.reconcile import DriftType, diff_state, fetch_actuals, format_report
-from src.services.ingest import extract_campaigns, format_ambiguity_report, read_excel
-from src.services.state import StateFile
 from src.services.budget import check_cap, format_budget_section
+from src.services.ingest import extract_campaigns, format_ambiguity_report, read_excel
 from src.services.lint import lint_stack
+from src.services.state import StateFile
 from src.services.validate import validate_all
 from src.traffic import apply as apply_plan
-from src.traffic import load_campaign_json, plan
+from src.traffic import load_campaign_json, plan, plan_remediate_drift
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -76,6 +76,7 @@ def _load_state(account_id: str) -> StateFile:
 # Tool definitions
 # ------------------------------------------------------------------
 
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return [
@@ -118,6 +119,22 @@ async def list_tools() -> list[Tool]:
                 "and field mismatches only; unmanaged account objects are intentionally excluded."
             ),
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="remediate_drift",
+            description=(
+                "Overwrite live Facebook drift with the approved active stack template, then update local state. "
+                "Use after reviewing drift_stack. Deletes require confirm_deletes=true."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "confirm_deletes": {
+                        "type": "boolean",
+                        "description": "Set true to proceed when drift remediation includes deletions.",
+                    },
+                },
+            },
         ),
         Tool(
             name="show_state",
@@ -195,6 +212,7 @@ async def list_tools() -> list[Tool]:
 # Tool handlers
 # ------------------------------------------------------------------
 
+
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     arguments = arguments or {}
@@ -207,6 +225,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _apply_stack(arguments)
         if name == "drift_stack":
             return await _drift_stack(arguments)
+        if name == "remediate_drift":
+            return await _remediate_drift(arguments)
         if name == "show_state":
             return await _show_state(arguments)
         if name == "import_resource":
@@ -239,7 +259,9 @@ def _format_plan(p) -> str:
             detail = " / ".join(filter(None, [cname, aname, ad_name]))
             lines.append(f'{label}: "{detail}"  (fb_id: {fb_id})')
         elif hasattr(op, "changed_fields"):
-            lines.append(f"  {op_type}: {cname} - fields: {list(op.changed_fields.keys())}")
+            lines.append(
+                f"  {op_type}: {cname} - fields: {list(op.changed_fields.keys())}"
+            )
         else:
             lines.append(f"  {op_type}: {cname}")
     return "\n".join(lines)
@@ -262,17 +284,27 @@ async def _show_stack(args: dict) -> list[TextContent]:
 async def _plan_stack(args: dict) -> list[TextContent]:
     json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
+    validation = validate_all(
+        campaign_json, _get_ai_client(), stack_dir=json_path.parent
+    )
 
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, None)
 
-    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    cap = (
+        int(os.environ["ACCOUNT_BUDGET_CAP"])
+        if os.environ.get("ACCOUNT_BUDGET_CAP")
+        else None
+    )
     currency = os.environ.get("CURRENCY", "USD")
     cap_result = check_cap(p.budget_delta, campaign_json, cap)
     budget_section = format_budget_section(p.budget_delta, cap_result, currency)
 
-    diff_section = _format_plan(p) if len(p) > 0 else "No changes - Facebook already matches this configuration."
+    diff_section = (
+        _format_plan(p)
+        if len(p) > 0
+        else "No changes - Facebook already matches this configuration."
+    )
     lint_report = lint_stack(campaign_json)
     parts = [validation.summary(), "", diff_section, "", budget_section]
     if not lint_report.is_empty():
@@ -283,24 +315,43 @@ async def _plan_stack(args: dict) -> list[TextContent]:
 async def _apply_stack(args: dict) -> list[TextContent]:
     json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
+    validation = validate_all(
+        campaign_json, _get_ai_client(), stack_dir=json_path.parent
+    )
 
     if not validation.is_pushable:
-        return [TextContent(type="text", text=f"Blocked by validation.\n\n{validation.summary()}")]
+        return [
+            TextContent(
+                type="text", text=f"Blocked by validation.\n\n{validation.summary()}"
+            )
+        ]
 
     meta = _get_meta_client()
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, meta)
 
-    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    cap = (
+        int(os.environ["ACCOUNT_BUDGET_CAP"])
+        if os.environ.get("ACCOUNT_BUDGET_CAP")
+        else None
+    )
     currency = os.environ.get("CURRENCY", "USD")
     cap_result = check_cap(p.budget_delta, campaign_json, cap)
     if cap_result.exceeded:
         budget_section = format_budget_section(p.budget_delta, cap_result, currency)
-        return [TextContent(type="text", text=f"Blocked by budget cap.\n\n{budget_section}\n\n{validation.summary()}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Blocked by budget cap.\n\n{budget_section}\n\n{validation.summary()}",
+            )
+        ]
 
     if len(p) == 0:
-        return [TextContent(type="text", text=f"No changes detected.\n\n{validation.summary()}")]
+        return [
+            TextContent(
+                type="text", text=f"No changes detected.\n\n{validation.summary()}"
+            )
+        ]
 
     if p.has_deletes and not args.get("confirm_deletes"):
         message = (
@@ -318,7 +369,12 @@ async def _apply_stack(args: dict) -> list[TextContent]:
         campaign_json=campaign_json,
         campaign_json_path=str(json_path),
     )
-    return [TextContent(type="text", text="\n".join([validation.summary(), "", f"Applied: {result.summary()}"]))]
+    return [
+        TextContent(
+            type="text",
+            text="\n".join([validation.summary(), "", f"Applied: {result.summary()}"]),
+        )
+    ]
 
 
 async def _show_state(args: dict) -> list[TextContent]:
@@ -328,10 +384,14 @@ async def _show_state(args: dict) -> list[TextContent]:
 
     campaigns = state.campaigns()
     if campaign_name_filter:
-        campaigns = {k: v for k, v in campaigns.items() if campaign_name_filter in k.lower()}
+        campaigns = {
+            k: v for k, v in campaigns.items() if campaign_name_filter in k.lower()
+        }
 
     if not campaigns:
-        return [TextContent(type="text", text="No matching campaigns found in state file.")]
+        return [
+            TextContent(type="text", text="No matching campaigns found in state file.")
+        ]
 
     return [TextContent(type="text", text=json.dumps(campaigns, indent=2))]
 
@@ -342,8 +402,99 @@ async def _drift_stack(args: dict) -> list[TextContent]:
     state = _load_state(account_id)
     actuals = fetch_actuals(account_id, meta)
     report = diff_state(state, actuals)
-    report.items = [item for item in report.items if item.drift_type != DriftType.MISSING_FROM_STATE]
+    report.items = [
+        item for item in report.items if item.drift_type != DriftType.MISSING_FROM_STATE
+    ]
     return [TextContent(type="text", text=format_report(report))]
+
+
+async def _remediate_drift(args: dict) -> list[TextContent]:
+    json_path, _, _ = _require_stack_config()
+    campaign_json = _resolve_campaign_json()
+    validation = validate_all(
+        campaign_json, _get_ai_client(), stack_dir=json_path.parent
+    )
+
+    if not validation.is_pushable:
+        return [
+            TextContent(
+                type="text", text=f"Blocked by validation.\n\n{validation.summary()}"
+            )
+        ]
+
+    meta = _get_meta_client()
+    state = _load_state(campaign_json["account_id"])
+    actuals = fetch_actuals(campaign_json["account_id"], meta)
+    report = diff_state(state, actuals)
+    report.items = [
+        item for item in report.items if item.drift_type != DriftType.MISSING_FROM_STATE
+    ]
+
+    if not report.has_drift():
+        return [
+            TextContent(
+                type="text",
+                text=f"No managed drift detected.\n\n{validation.summary()}",
+            )
+        ]
+
+    p = plan_remediate_drift(campaign_json, state, actuals, meta)
+
+    cap = (
+        int(os.environ["ACCOUNT_BUDGET_CAP"])
+        if os.environ.get("ACCOUNT_BUDGET_CAP")
+        else None
+    )
+    currency = os.environ.get("CURRENCY", "USD")
+    cap_result = check_cap(p.budget_delta, campaign_json, cap)
+    if cap_result.exceeded:
+        budget_section = format_budget_section(p.budget_delta, cap_result, currency)
+        return [
+            TextContent(
+                type="text",
+                text=f"Blocked by budget cap.\n\n{budget_section}\n\n{validation.summary()}",
+            )
+        ]
+
+    if len(p) == 0:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    "Managed drift was detected, but no safe remediation operations were generated.\n\n"
+                    f"{format_report(report)}\n\n{validation.summary()}"
+                ),
+            )
+        ]
+
+    if p.has_deletes and not args.get("confirm_deletes"):
+        message = (
+            f"{validation.summary()}\n\n"
+            "Drift remediation includes deletions. Call again with confirm_deletes=true to proceed.\n\n"
+            + _format_plan(p)
+        )
+        return [TextContent(type="text", text=message)]
+
+    result = apply_plan(
+        p,
+        meta,
+        state,
+        campaign_json=campaign_json,
+        campaign_json_path=str(json_path),
+    )
+    return [
+        TextContent(
+            type="text",
+            text="\n".join(
+                [
+                    validation.summary(),
+                    "",
+                    "Remediated drift by applying the approved stack to live Facebook.",
+                    f"Applied: {result.summary()}",
+                ]
+            ),
+        )
+    ]
 
 
 async def _draft_stack(args: dict) -> list[TextContent]:
@@ -358,7 +509,12 @@ async def _draft_stack(args: dict) -> list[TextContent]:
         "campaigns": result.campaigns,
     }
     lint_report = lint_stack(draft_template)
-    lines = [report, "", "Extracted campaign JSON:", json.dumps(draft_template, indent=2)]
+    lines = [
+        report,
+        "",
+        "Extracted campaign JSON:",
+        json.dumps(draft_template, indent=2),
+    ]
     if not lint_report.is_empty():
         lines += ["", "Draft lint notes:", lint_report.summary()]
     return [TextContent(type="text", text="\n".join(lines))]
@@ -369,12 +525,18 @@ async def _document_stack(args: dict) -> list[TextContent]:
 
     json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
+    validation = validate_all(
+        campaign_json, _get_ai_client(), stack_dir=json_path.parent
+    )
 
     state = _load_state(campaign_json["account_id"])
     p = plan(campaign_json, state, None)
 
-    cap = int(os.environ["ACCOUNT_BUDGET_CAP"]) if os.environ.get("ACCOUNT_BUDGET_CAP") else None
+    cap = (
+        int(os.environ["ACCOUNT_BUDGET_CAP"])
+        if os.environ.get("ACCOUNT_BUDGET_CAP")
+        else None
+    )
     currency = os.environ.get("CURRENCY", "USD")
     cap_result = check_cap(p.budget_delta, campaign_json, cap)
 
@@ -393,7 +555,11 @@ async def _document_stack(args: dict) -> list[TextContent]:
 
 
 def _unsupported_resource_message() -> list[TextContent]:
-    return [TextContent(type="text", text="Only resource_type='adset' is currently supported.")]
+    return [
+        TextContent(
+            type="text", text="Only resource_type='adset' is currently supported."
+        )
+    ]
 
 
 def _to_plain(obj):
@@ -423,7 +589,12 @@ _ADSET_IMPORT_FIELDS = (
 def _adset_entry_from_live(live: dict) -> dict:
     """Build template/state ad set fields from Facebook Graph ad set fields."""
     name = live.get("name") or str(live.get("id", ""))
-    entry = {"name": name, "status": live.get("status", "PAUSED"), "ads": [], "fb_id": str(live["id"])}
+    entry = {
+        "name": name,
+        "status": live.get("status", "PAUSED"),
+        "ads": [],
+        "fb_id": str(live["id"]),
+    }
     for field in _ADSET_IMPORT_FIELDS:
         if live.get(field) is None:
             continue
@@ -482,7 +653,9 @@ async def _import_resource(args: dict) -> list[TextContent]:
         result = {
             "resource_type": "adset",
             "count": len(candidates),
-            "candidates": [{k: v for k, v in c.items() if k != "live"} for c in candidates],
+            "candidates": [
+                {k: v for k, v in c.items() if k != "live"} for c in candidates
+            ],
         }
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
@@ -494,12 +667,21 @@ async def _import_resource(args: dict) -> list[TextContent]:
     campaign_json = load_campaign_json(str(json_path))
     candidates = _missing_template_adsets(meta, campaign_json)
     if name_filter:
-        candidates = [candidate for candidate in candidates if candidate["name"] in name_filter]
+        candidates = [
+            candidate for candidate in candidates if candidate["name"] in name_filter
+        ]
 
     if not candidates:
-        return [TextContent(type="text", text="No supported untracked resources found - nothing to import.")]
+        return [
+            TextContent(
+                type="text",
+                text="No supported untracked resources found - nothing to import.",
+            )
+        ]
 
-    campaigns_by_name = {campaign["name"]: i for i, campaign in enumerate(campaign_json["campaigns"])}
+    campaigns_by_name = {
+        campaign["name"]: i for i, campaign in enumerate(campaign_json["campaigns"])
+    }
     imported = []
 
     for candidate in candidates:
@@ -510,9 +692,15 @@ async def _import_resource(args: dict) -> list[TextContent]:
         campaign_json["campaigns"][campaign_idx].setdefault("ad_sets", [])
         campaign_json["campaigns"][campaign_idx]["ad_sets"].append(adset_entry)
 
-        params = {key: value for key, value in adset_entry.items() if key not in ("ads", "fb_id")}
+        params = {
+            key: value
+            for key, value in adset_entry.items()
+            if key not in ("ads", "fb_id")
+        }
         state.upsert_adset(parent, adset_entry["name"], candidate["fb_id"], params)
-        imported.append(f'{parent} / {candidate["name"]}  (fb_id: {candidate["fb_id"]})')
+        imported.append(
+            f"{parent} / {candidate['name']}  (fb_id: {candidate['fb_id']})"
+        )
 
     with open(json_path, "w", encoding="utf-8") as fh:
         json.dump(campaign_json, fh, indent=2, ensure_ascii=False)
@@ -520,13 +708,16 @@ async def _import_resource(args: dict) -> list[TextContent]:
 
     lines = [f"Imported {len(imported)} resource(s) into {json_path.name} and state:"]
     lines.extend(f"  + {entry}" for entry in imported)
-    lines.extend(["", "Run plan_stack to verify no spurious changes before committing."])
+    lines.extend(
+        ["", "Run plan_stack to verify no spurious changes before committing."]
+    )
     return [TextContent(type="text", text="\n".join(lines))]
 
 
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
+
 
 def _load_stack_config(template_path: str) -> None:
     """Configure the server from a stack template file.

@@ -34,8 +34,9 @@ The target Local Operator Mode tool surface is:
 | `show_stack` | Show active stack context, paths, account ID, and local configuration status. |
 | `draft_stack` | Produce starter JSON from supported sources such as Excel, text brief, or recipe. Does not call Facebook or apply changes. |
 | `plan_stack` | Validate the active stack and show the changeset. This is the normal validation feedback path. |
-| `apply_stack` | Apply reviewed changes to Facebook and update state. |
+| `apply_stack` | Apply reviewed template changes to Facebook and update state. |
 | `drift_stack` | Compare managed state to live Facebook data. |
+| `remediate_drift` | After reviewed drift, overwrite managed live Facebook drift with the approved template and update state. |
 | `show_state` | Inspect tracked local state for the active stack. |
 | `import_resource` | Preview and import supported live resources into the template/state. |
 | `document_stack` | Produce a non-technical campaign review packet. |

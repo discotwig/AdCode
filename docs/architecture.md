@@ -135,7 +135,9 @@ State writes are atomic: the state service writes a temporary file and renames i
 - `FIELD_MISMATCH`: present in both, but tracked fields differ.
 - `IN_SYNC`: no tracked difference.
 
-Drift detection intentionally compares state to live Facebook data. It does not treat the template as proof of what is live, and it does not report unmanaged account objects as drift. Use `search_import_candidates(resource_type="adset")` when you want to discover supported live objects that can be adopted into the stack.
+Drift detection intentionally compares state to live Facebook data. It does not treat the template as proof of what is live, and it does not report unmanaged account objects as drift.
+
+`remediate_drift` is the explicit write path for correcting drift. It fetches live Facebook actuals, plans against the approved template instead of the saved state, applies the required updates to make Facebook match the template, and then updates `state.json`. This keeps `drift_stack` read-only while providing Terraform-like remediation for reviewed drift. Use `import_resource(resource_type="adset", preview=true)` when you want to discover supported live objects that can be adopted into the stack.
 
 ## Hosted Boundary
 

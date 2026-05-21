@@ -188,7 +188,8 @@ The normal operator loop is:
 
 ```text
 draft_stack (seed from Excel) → edit JSON → plan_stack → apply_stack
-drift_stack / show_state / import_resource / document_stack as needed
+drift_stack → remediate_drift when live Facebook has manual changes to overwrite
+show_state / import_resource / document_stack as needed
 ```
 
 | Tool | Description |
@@ -198,6 +199,7 @@ drift_stack / show_state / import_resource / document_stack as needed
 | `plan_stack` | Validate the active stack (schema, policy rules, AI review) and show the full changeset. The normal validation feedback path — run this before every apply. Includes budget delta and cap check when `ACCOUNT_BUDGET_CAP` is set. |
 | `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require a second call with `confirm_deletes=true` after reviewing the plan. |
 | `drift_stack` | Compare managed stack state to live Facebook data. Reports only stack-managed objects; unmanaged account objects are intentionally excluded. |
+| `remediate_drift(confirm_deletes?)` | Terraform-like drift remediation: compare the approved template to live Facebook, overwrite managed live drift with template values, and update local state. Run after reviewing `drift_stack`; deletes require `confirm_deletes=true`. |
 | `show_state(campaign_name?)` | Read this stack's `state.json`. Does not call Facebook. |
 | `import_resource(resource_type, names?, preview?)` | Adopt live resources into the stack template and state. Use `preview=true` to list importable candidates before committing. Currently supports `resource_type="adset"` only. |
 | `document_stack` | Generate a Campaign Review Packet — a Markdown report for non-technical review showing planned changes, budget impact, policy results, targeting summary, flight dates, and an approval recommendation. Does not call Facebook. |

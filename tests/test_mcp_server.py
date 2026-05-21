@@ -1,7 +1,8 @@
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.mcp_server import (
     _apply_stack,
@@ -11,6 +12,7 @@ from src.mcp_server import (
     _import_resource,
     _load_stack_config,
     _plan_stack,
+    _remediate_drift,
     _show_stack,
     _show_state,
     call_tool,
@@ -18,7 +20,6 @@ from src.mcp_server import (
     main,
 )
 from src.services.state import StateFile
-
 
 CAMPAIGNS_DIR = Path(__file__).parent / "fixtures"
 EXAMPLE_PATH = str(CAMPAIGNS_DIR / "example.json")
@@ -55,7 +56,9 @@ def _patch_active_stack(tmp_path, template_data=None):
     return (
         patch("src.mcp_server._STACK_JSON_PATH", template.resolve()),
         patch("src.mcp_server._STACK_STATE_DIR", tmp_path),
-        patch("src.mcp_server._ACCOUNT_ID", (template_data or EXAMPLE_JSON)["account_id"]),
+        patch(
+            "src.mcp_server._ACCOUNT_ID", (template_data or EXAMPLE_JSON)["account_id"]
+        ),
         patch("src.services.state.STATE_DIR", tmp_path),
     )
 
@@ -68,13 +71,25 @@ def _state_matching_example():
     state.upsert_campaign(
         campaign["name"],
         campaign.get("fb_id", "c1"),
-        {k: campaign[k] for k in ["name", "objective", "status", "special_ad_categories"]},
+        {
+            k: campaign[k]
+            for k in ["name", "objective", "status", "special_ad_categories"]
+        },
     )
     state.upsert_adset(
         campaign["name"],
         adset["name"],
         adset.get("fb_id", "a1"),
-        {k: adset[k] for k in ["name", "status", "billing_event", "optimization_goal", "daily_budget"]},
+        {
+            k: adset[k]
+            for k in [
+                "name",
+                "status",
+                "billing_event",
+                "optimization_goal",
+                "daily_budget",
+            ]
+        },
     )
     state.upsert_ad(
         campaign["name"],
@@ -98,6 +113,7 @@ async def test_list_tools_is_strict_iac_surface():
         "plan_stack",
         "apply_stack",
         "drift_stack",
+        "remediate_drift",
         "show_state",
         "import_resource",
         "document_stack",
@@ -142,9 +158,12 @@ def test_load_stack_config_sets_globals_and_account_env(tmp_path):
     stack_dir = tmp_path / "my_stack"
     stack_dir.mkdir()
     template = stack_dir / "my_stack_template.json"
-    template.write_text(json.dumps({"account_id": "act_999", "campaigns": []}), encoding="utf-8")
+    template.write_text(
+        json.dumps({"account_id": "act_999", "campaigns": []}), encoding="utf-8"
+    )
 
     import src.mcp_server as mod
+
     with patch.dict("os.environ", {}, clear=False):
         _load_stack_config(str(template))
         assert mod.os.environ["FB_ACCOUNT_ID"] == "act_999"
@@ -158,12 +177,17 @@ def test_load_stack_config_loads_stack_env(tmp_path):
     stack_dir = tmp_path / "my_stack"
     stack_dir.mkdir()
     template = stack_dir / "my_stack_template.json"
-    template.write_text(json.dumps({"account_id": "act_888", "campaigns": []}), encoding="utf-8")
-    (stack_dir / ".env").write_text("FB_APP_ID=test_app_id_from_env\n", encoding="utf-8")
+    template.write_text(
+        json.dumps({"account_id": "act_888", "campaigns": []}), encoding="utf-8"
+    )
+    (stack_dir / ".env").write_text(
+        "FB_APP_ID=test_app_id_from_env\n", encoding="utf-8"
+    )
 
     with patch.dict("os.environ", {}, clear=False):
         _load_stack_config(str(template))
         import os
+
         assert os.environ.get("FB_APP_ID") == "test_app_id_from_env"
 
 
@@ -187,8 +211,14 @@ async def test_plan_stack_does_not_call_provider_writes(tmp_path):
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
         patch("src.mcp_server._get_meta_client", return_value=meta),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state"),
+        ),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _plan_stack({})
 
@@ -203,8 +233,14 @@ async def test_plan_stack_passes_stack_state_name(tmp_path):
     stack_patches = _patch_active_stack(tmp_path)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")) as mock_load,
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state"),
+        ) as mock_load,
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         await _plan_stack({})
 
@@ -213,13 +249,26 @@ async def test_plan_stack_passes_stack_state_name(tmp_path):
 
 @pytest.mark.asyncio
 async def test_apply_stack_blocks_policy_errors(tmp_path):
-    warnings = [{"severity": "ERROR", "field": "x", "message": "Prohibited", "suggestion": "Fix"}]
+    warnings = [
+        {
+            "severity": "ERROR",
+            "field": "x",
+            "message": "Prohibited",
+            "suggestion": "Fix",
+        }
+    ]
     stack_patches = _patch_active_stack(tmp_path)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client(warnings)),
         patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"])),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(EXAMPLE_JSON["account_id"]),
+        ),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _apply_stack({})
 
@@ -232,14 +281,22 @@ async def test_apply_stack_requires_delete_confirmation(tmp_path):
     state.upsert_campaign(
         "Stale Campaign",
         "stale_001",
-        {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []},
+        {
+            "name": "Stale Campaign",
+            "status": "PAUSED",
+            "objective": "REACH",
+            "special_ad_categories": [],
+        },
     )
     stack_patches = _patch_active_stack(tmp_path)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
         patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _apply_stack({})
 
@@ -253,7 +310,12 @@ async def test_apply_stack_executes_confirmed_delete(tmp_path):
     state.upsert_campaign(
         "Stale Campaign",
         "stale_001",
-        {"name": "Stale Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []},
+        {
+            "name": "Stale Campaign",
+            "status": "PAUSED",
+            "objective": "REACH",
+            "special_ad_categories": [],
+        },
     )
     meta = _make_meta_client()
     stack_patches = _patch_active_stack(tmp_path)
@@ -261,7 +323,10 @@ async def test_apply_stack_executes_confirmed_delete(tmp_path):
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
         patch("src.mcp_server._get_meta_client", return_value=meta),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _apply_stack({"confirm_deletes": True})
 
@@ -278,7 +343,10 @@ async def test_show_state_reads_local_state_without_meta(tmp_path):
     with (
         patch("src.mcp_server.StateFile.load", return_value=state),
         patch("src.mcp_server._get_meta_client", return_value=meta),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _show_state({"campaign_name": "summer"})
 
@@ -380,19 +448,83 @@ def _list_adsets_under_import_parent():
 
 
 @pytest.mark.asyncio
+async def test_remediate_drift_applies_template_over_live_field_mismatch(tmp_path):
+    clean_template = {
+        "account_id": "act_123456789",
+        "campaigns": [
+            {
+                "name": "Summer Sale",
+                "fb_id": "camp_001",
+                "objective": "OUTCOME_TRAFFIC",
+                "status": "PAUSED",
+                "special_ad_categories": [],
+                "ad_sets": [],
+            }
+        ],
+    }
+    state = StateFile(clean_template["account_id"], stack_name="state")
+    state.upsert_campaign(
+        "Summer Sale",
+        "camp_001",
+        {
+            "name": "Summer Sale",
+            "objective": "OUTCOME_TRAFFIC",
+            "status": "PAUSED",
+            "special_ad_categories": [],
+        },
+    )
+    actuals = {
+        "Summer Sale": {
+            "fb_id": "camp_001",
+            "id": "camp_001",
+            "name": "Summer Sale",
+            "objective": "OUTCOME_TRAFFIC",
+            "status": "ACTIVE",
+            "special_ad_categories": [],
+            "ad_sets": {},
+        }
+    }
+    meta = _make_meta_client()
+    stack_patches = _patch_active_stack(tmp_path, clean_template)
+    with (
+        patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+        patch("src.mcp_server._get_meta_client", return_value=meta),
+        patch("src.mcp_server.StateFile.load", return_value=state),
+        patch("src.mcp_server.fetch_actuals", return_value=actuals),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
+    ):
+        result = await _remediate_drift({})
+
+    assert "Remediated drift" in result[0].text
+    meta.update_campaign.assert_called_once_with("camp_001", {"status": "PAUSED"})
+    assert state.get_campaign_params("Summer Sale")["status"] == "PAUSED"
+
+
+@pytest.mark.asyncio
 async def test_drift_stack_filters_unmanaged_live_objects(tmp_path):
     state = StateFile("act_123", stack_name="state")
     state.upsert_campaign(
         "Parent Campaign",
         "camp_001",
-        {"name": "Parent Campaign", "status": "PAUSED", "objective": "REACH", "special_ad_categories": []},
+        {
+            "name": "Parent Campaign",
+            "status": "PAUSED",
+            "objective": "REACH",
+            "special_ad_categories": [],
+        },
     )
     stack_patches = _patch_active_stack(tmp_path, _import_template())
     with (
         patch("src.mcp_server._get_meta_client", return_value=_make_meta_client()),
         patch("src.mcp_server.StateFile.load", return_value=state),
         patch("src.mcp_server.fetch_actuals", return_value=_actuals_for_import()),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _drift_stack({})
 
@@ -403,14 +535,19 @@ async def test_drift_stack_filters_unmanaged_live_objects(tmp_path):
 @pytest.mark.asyncio
 async def test_import_resource_preview_lists_candidates_without_writing(tmp_path):
     state = StateFile("act_123", stack_name="state")
-    state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    state.upsert_campaign(
+        "Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"}
+    )
     meta = _make_meta_client()
     meta.list_adsets.return_value = _list_adsets_under_import_parent()
     stack_patches = _patch_active_stack(tmp_path, _import_template())
     with (
         patch("src.mcp_server._get_meta_client", return_value=meta),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _import_resource({"resource_type": "adset", "preview": True})
 
@@ -420,7 +557,9 @@ async def test_import_resource_preview_lists_candidates_without_writing(tmp_path
     assert "Outside Ad Set" not in result[0].text
     meta.list_adsets.assert_called_once_with("camp_001")
     # preview must not modify template or state
-    template_on_disk = json.loads((tmp_path / "test_stack_template.json").read_text(encoding="utf-8"))
+    template_on_disk = json.loads(
+        (tmp_path / "test_stack_template.json").read_text(encoding="utf-8")
+    )
     assert template_on_disk["campaigns"][0]["ad_sets"] == []
     state.save = MagicMock()
     state.save.assert_not_called()
@@ -435,19 +574,28 @@ async def test_import_resource_preview_rejects_unsupported_type():
 @pytest.mark.asyncio
 async def test_import_resource_imports_named_adset(tmp_path):
     state = StateFile("act_123", stack_name="state")
-    state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
+    state.upsert_campaign(
+        "Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"}
+    )
     meta = _make_meta_client()
     meta.list_adsets.return_value = _list_adsets_under_import_parent()
     stack_patches = _patch_active_stack(tmp_path, _import_template())
     with (
         patch("src.mcp_server._get_meta_client", return_value=meta),
         patch("src.mcp_server.StateFile.load", return_value=state),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
-        result = await _import_resource({"resource_type": "adset", "names": ["Ad Set A"]})
+        result = await _import_resource(
+            {"resource_type": "adset", "names": ["Ad Set A"]}
+        )
 
     assert "Imported 1" in result[0].text
-    updated = json.loads((tmp_path / "test_stack_template.json").read_text(encoding="utf-8"))
+    updated = json.loads(
+        (tmp_path / "test_stack_template.json").read_text(encoding="utf-8")
+    )
     adset_names = [adset["name"] for adset in updated["campaigns"][0]["ad_sets"]]
     assert adset_names == ["Ad Set A"]
     assert updated["campaigns"][0]["ad_sets"][0].get("fb_id") == "adset_A"
@@ -463,7 +611,14 @@ async def test_import_resource_rejects_unsupported_type():
 @pytest.mark.asyncio
 async def test_draft_stack_returns_template_json(tmp_path):
     result_obj = MagicMock()
-    result_obj.campaigns = [{"name": "Generated Campaign", "objective": "REACH", "status": "PAUSED", "ad_sets": []}]
+    result_obj.campaigns = [
+        {
+            "name": "Generated Campaign",
+            "objective": "REACH",
+            "status": "PAUSED",
+            "ad_sets": [],
+        }
+    ]
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
         patch("src.mcp_server.read_excel", return_value={"Sheet1": []}),
@@ -488,13 +643,22 @@ async def test_plan_stack_includes_lint_section_for_placeholder_template(tmp_pat
     stack_patches = _patch_active_stack(tmp_path)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state"),
+        ),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _plan_stack({})
 
     # The example.json fixture uses act_000000000 — lint should flag it
-    assert "lint-placeholder-account-id" in result[0].text or "act_000000000" in result[0].text
+    assert (
+        "lint-placeholder-account-id" in result[0].text
+        or "act_000000000" in result[0].text
+    )
 
 
 @pytest.mark.asyncio
@@ -528,8 +692,14 @@ async def test_plan_stack_no_lint_section_for_clean_template(tmp_path):
     stack_patches = _patch_active_stack(tmp_path, clean_template)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(clean_template["account_id"], stack_name="state")),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(clean_template["account_id"], stack_name="state"),
+        ),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _plan_stack({})
 
@@ -542,8 +712,14 @@ async def test_document_stack_includes_lint_findings(tmp_path):
     stack_patches = _patch_active_stack(tmp_path)
     with (
         patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+        patch(
+            "src.mcp_server.StateFile.load",
+            return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state"),
+        ),
+        stack_patches[0],
+        stack_patches[1],
+        stack_patches[2],
+        stack_patches[3],
     ):
         result = await _document_stack({})
 
@@ -555,7 +731,9 @@ def test_main_does_not_perform_startup_facebook_check(tmp_path):
     stack_dir = tmp_path / "my_stack"
     stack_dir.mkdir()
     template = stack_dir / "my_stack_template.json"
-    template.write_text(json.dumps({"account_id": "act_123", "campaigns": []}), encoding="utf-8")
+    template.write_text(
+        json.dumps({"account_id": "act_123", "campaigns": []}), encoding="utf-8"
+    )
 
     with (
         patch("sys.argv", ["mcp_server", "--config", str(template)]),
