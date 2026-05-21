@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.budget import (
     BudgetDelta,
@@ -20,10 +21,10 @@ from src.traffic import (
     UpdateCampaign,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _empty_state() -> StateFile:
     return StateFile("act_000000000")
@@ -50,8 +51,13 @@ def _template(campaigns=None):
 
 
 def _campaign(name="Camp A", daily_budget=None, spend_cap=None, ad_sets=None):
-    c = {"name": name, "objective": "OUTCOME_TRAFFIC", "status": "PAUSED",
-         "special_ad_categories": [], "ad_sets": ad_sets or []}
+    c = {
+        "name": name,
+        "objective": "OUTCOME_TRAFFIC",
+        "status": "PAUSED",
+        "special_ad_categories": [],
+        "ad_sets": ad_sets or [],
+    }
     if daily_budget is not None:
         c["daily_budget"] = daily_budget
     if spend_cap is not None:
@@ -60,9 +66,14 @@ def _campaign(name="Camp A", daily_budget=None, spend_cap=None, ad_sets=None):
 
 
 def _adset(name="Ad Set A", daily_budget=None, lifetime_budget=None):
-    a = {"name": name, "status": "PAUSED", "billing_event": "IMPRESSIONS",
-         "optimization_goal": "LINK_CLICKS",
-         "targeting": {"geo_locations": {"countries": ["US"]}}, "ads": []}
+    a = {
+        "name": name,
+        "status": "PAUSED",
+        "billing_event": "IMPRESSIONS",
+        "optimization_goal": "LINK_CLICKS",
+        "targeting": {"geo_locations": {"countries": ["US"]}},
+        "ads": [],
+    }
     if daily_budget is not None:
         a["daily_budget"] = daily_budget
     if lifetime_budget is not None:
@@ -73,6 +84,7 @@ def _adset(name="Ad Set A", daily_budget=None, lifetime_budget=None):
 # ---------------------------------------------------------------------------
 # estimate_delta — creates
 # ---------------------------------------------------------------------------
+
 
 class TestEstimateDeltaCreates:
     def test_create_campaign_adds_daily_budget(self):
@@ -128,17 +140,30 @@ class TestEstimateDeltaCreates:
 # estimate_delta — deletes
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateDeltaDeletes:
     def test_delete_adset_removes_daily_budget_from_state(self):
         state = _state_with_adset("Camp A", "Ad Set A", {"daily_budget": 5000})
-        p = Plan(operations=[DeleteAdSet(campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001")])
+        p = Plan(
+            operations=[
+                DeleteAdSet(
+                    campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001"
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.removed == 50
 
     def test_delete_adset_removes_lifetime_budget_from_state(self):
         state = _state_with_adset("Camp A", "Ad Set A", {"lifetime_budget": 200000})
-        p = Plan(operations=[DeleteAdSet(campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001")])
+        p = Plan(
+            operations=[
+                DeleteAdSet(
+                    campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001"
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.removed == 2000
@@ -152,7 +177,13 @@ class TestEstimateDeltaDeletes:
 
     def test_delete_adset_with_no_state_params_removes_zero(self):
         state = _empty_state()
-        p = Plan(operations=[DeleteAdSet(campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001")])
+        p = Plan(
+            operations=[
+                DeleteAdSet(
+                    campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001"
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.removed == 0
@@ -162,24 +193,37 @@ class TestEstimateDeltaDeletes:
 # estimate_delta — updates
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateDeltaUpdates:
     def test_update_adset_budget_increase(self):
         state = _state_with_adset("Camp A", "Ad Set A", {"daily_budget": 5000})
-        p = Plan(operations=[UpdateAdSet(
-            campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001",
-            changed_fields={"daily_budget": 10000},
-        )])
+        p = Plan(
+            operations=[
+                UpdateAdSet(
+                    campaign_name="Camp A",
+                    adset_name="Ad Set A",
+                    fb_id="adset_001",
+                    changed_fields={"daily_budget": 10000},
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
-        assert delta.added == 50   # 10000 - 5000 = 5000 cents = $50 increase
+        assert delta.added == 50  # 10000 - 5000 = 5000 cents = $50 increase
         assert delta.removed == 0
 
     def test_update_adset_budget_decrease(self):
         state = _state_with_adset("Camp A", "Ad Set A", {"daily_budget": 10000})
-        p = Plan(operations=[UpdateAdSet(
-            campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001",
-            changed_fields={"daily_budget": 5000},
-        )])
+        p = Plan(
+            operations=[
+                UpdateAdSet(
+                    campaign_name="Camp A",
+                    adset_name="Ad Set A",
+                    fb_id="adset_001",
+                    changed_fields={"daily_budget": 5000},
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.added == 0
@@ -187,20 +231,65 @@ class TestEstimateDeltaUpdates:
 
     def test_update_campaign_budget_increase(self):
         state = _state_with_campaign("Camp A", {"daily_budget": 5000})
-        p = Plan(operations=[UpdateCampaign(
-            campaign_name="Camp A", fb_id="camp_001",
-            changed_fields={"daily_budget": 15000},
-        )])
+        p = Plan(
+            operations=[
+                UpdateCampaign(
+                    campaign_name="Camp A",
+                    fb_id="camp_001",
+                    changed_fields={"daily_budget": 15000},
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.added == 100  # (15000 - 5000) cents = $100
 
+    def test_update_budget_handles_facebook_string_values(self):
+        state = _state_with_adset("Camp A", "Ad Set A", {"daily_budget": "10000"})
+        p = Plan(
+            operations=[
+                UpdateAdSet(
+                    campaign_name="Camp A",
+                    adset_name="Ad Set A",
+                    fb_id="adset_001",
+                    changed_fields={"daily_budget": 5000},
+                )
+            ]
+        )
+        template = _template()
+        delta = estimate_delta(p, state, template)
+        assert delta.added == 0
+        assert delta.removed == 50
+
+    def test_delete_budget_handles_facebook_string_values(self):
+        state = _state_with_adset(
+            "Camp A", "Ad Set A", {"daily_budget": "5000", "lifetime_budget": "10000"}
+        )
+        p = Plan(
+            operations=[
+                DeleteAdSet(
+                    campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001"
+                )
+            ]
+        )
+        template = _template()
+        delta = estimate_delta(p, state, template)
+        assert delta.removed == 150
+
     def test_update_with_no_budget_fields_is_zero(self):
-        state = _state_with_adset("Camp A", "Ad Set A", {"daily_budget": 5000, "status": "ACTIVE"})
-        p = Plan(operations=[UpdateAdSet(
-            campaign_name="Camp A", adset_name="Ad Set A", fb_id="adset_001",
-            changed_fields={"status": "PAUSED"},
-        )])
+        state = _state_with_adset(
+            "Camp A", "Ad Set A", {"daily_budget": 5000, "status": "ACTIVE"}
+        )
+        p = Plan(
+            operations=[
+                UpdateAdSet(
+                    campaign_name="Camp A",
+                    adset_name="Ad Set A",
+                    fb_id="adset_001",
+                    changed_fields={"status": "PAUSED"},
+                )
+            ]
+        )
         template = _template()
         delta = estimate_delta(p, state, template)
         assert delta.added == 0
@@ -210,6 +299,7 @@ class TestEstimateDeltaUpdates:
 # ---------------------------------------------------------------------------
 # estimate_delta — composite and edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEstimateDeltaComposite:
     def test_empty_plan_returns_zero_delta(self):
@@ -221,20 +311,25 @@ class TestEstimateDeltaComposite:
     def test_net_equals_added_minus_removed(self):
         state = _state_with_adset("Camp A", "Ad Set Old", {"daily_budget": 3000})
         adset_new = _adset("Ad Set New", daily_budget=8000)
-        p = Plan(operations=[
-            CreateAdSet(campaign_name="Camp A", adset=adset_new),
-            DeleteAdSet(campaign_name="Camp A", adset_name="Ad Set Old", fb_id="adset_001"),
-        ])
+        p = Plan(
+            operations=[
+                CreateAdSet(campaign_name="Camp A", adset=adset_new),
+                DeleteAdSet(
+                    campaign_name="Camp A", adset_name="Ad Set Old", fb_id="adset_001"
+                ),
+            ]
+        )
         template = _template([_campaign(ad_sets=[adset_new])])
         delta = estimate_delta(p, state, template)
-        assert delta.added == 80   # 8000 cents = $80
+        assert delta.added == 80  # 8000 cents = $80
         assert delta.removed == 30  # 3000 cents = $30
-        assert delta.net == 50     # 80 - 30
+        assert delta.net == 50  # 80 - 30
 
 
 # ---------------------------------------------------------------------------
 # check_cap
 # ---------------------------------------------------------------------------
+
 
 class TestCheckCap:
     def test_no_cap_never_exceeded(self):
@@ -260,10 +355,16 @@ class TestCheckCap:
 
     def test_projected_equals_template_total_in_dollars(self):
         # Two ad sets: 5000 + 10000 cents = $50 + $100 = $150 total
-        template = _template([_campaign(ad_sets=[
-            _adset("AS1", daily_budget=5000),
-            _adset("AS2", daily_budget=10000),
-        ])])
+        template = _template(
+            [
+                _campaign(
+                    ad_sets=[
+                        _adset("AS1", daily_budget=5000),
+                        _adset("AS2", daily_budget=10000),
+                    ]
+                )
+            ]
+        )
         delta = BudgetDelta(added=0, removed=0, net=0)
         result = check_cap(delta, template, cap=200)
         assert result.projected == 150
@@ -275,9 +376,16 @@ class TestCheckCap:
         assert result.projected == 200  # 20000 cents = $200
 
     def test_spend_cap_excluded_from_projected(self):
-        template = _template([_campaign(spend_cap=1000000, ad_sets=[
-            _adset("AS1", daily_budget=5000),
-        ])])
+        template = _template(
+            [
+                _campaign(
+                    spend_cap=1000000,
+                    ad_sets=[
+                        _adset("AS1", daily_budget=5000),
+                    ],
+                )
+            ]
+        )
         delta = BudgetDelta(added=0, removed=0, net=0)
         result = check_cap(delta, template, cap=500)
         assert result.projected == 50  # only daily_budget counts
@@ -298,6 +406,7 @@ class TestCheckCap:
 # ---------------------------------------------------------------------------
 # format_budget_section
 # ---------------------------------------------------------------------------
+
 
 class TestFormatBudgetSection:
     def _cap_none(self, projected=50):
@@ -346,9 +455,11 @@ class TestFormatBudgetSection:
 # Integration: plan() attaches budget_delta
 # ---------------------------------------------------------------------------
 
+
 class TestPlanAttachesBudgetDelta:
     def test_plan_has_budget_delta(self):
         from src.traffic import plan
+
         template = {
             "account_id": "act_000000000",
             "campaigns": [_campaign(ad_sets=[_adset(daily_budget=5000)])],
@@ -360,6 +471,7 @@ class TestPlanAttachesBudgetDelta:
 
     def test_plan_delta_reflects_creates(self):
         from src.traffic import plan
+
         template = {
             "account_id": "act_000000000",
             "campaigns": [_campaign(ad_sets=[_adset(daily_budget=5000)])],
@@ -373,11 +485,13 @@ class TestPlanAttachesBudgetDelta:
 # Integration: _apply_stack blocked by cap
 # ---------------------------------------------------------------------------
 
+
 class TestApplyBlockedByCap:
     @pytest.mark.asyncio
     async def test_apply_blocked_when_cap_exceeded(self, tmp_path):
         import json
         from unittest.mock import patch
+
         from src.mcp_server import _apply_stack
 
         template = {
@@ -409,7 +523,15 @@ class TestApplyBlockedByCap:
             patch("src.mcp_server._get_meta_client", return_value=meta_client),
             patch.dict("os.environ", {"ACCOUNT_BUDGET_CAP": "100", "CURRENCY": "USD"}),
         )
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = await _apply_stack({})
 
         text = result[0].text
