@@ -8,7 +8,21 @@ AdCode manages Meta Ads campaigns from declarative JSON stacks. This guide cover
 edit JSON → plan_stack → fix JSON → plan_stack → apply_stack
 ```
 
-`plan_stack` is the normal validation path. It runs schema validation, policy rules, and AI policy review, then shows the full changeset. Run it after every edit before applying.
+`plan_stack` is the normal validation path. It runs schema validation, policy rules, AI policy review, and template linting, then shows the full changeset. Run it after every edit before applying.
+
+## Lint Feedback
+
+`plan_stack` also reports deterministic lint warnings — findings that are structurally valid but suspicious, incomplete, or likely to cause problems at launch. Lint warnings are non-blocking; they appear in the plan output for review but do not prevent apply.
+
+Common lint checks:
+- **Placeholder cleanup** — leftover scaffold values like `act_000000000`, `REPLACE_WITH_PAGE_ID`, `IMAGE_HASH`, `example.com`, `TODO`, `TBD`
+- **Budget sanity** — both `daily_budget` and `lifetime_budget` on the same ad set; `lifetime_budget` without `start_time`/`end_time`
+- **Launch-status safety** — new resources (no `fb_id`) set to `ACTIVE` before review
+- **`fb_id` hygiene** — duplicate `fb_id` values that would confuse state correlation
+- **Naming** — duplicate campaign or ad set names within the same stack
+- **Creative completeness** — link creative missing a `call_to_action`
+
+Lint findings also appear in the Campaign Review Packet (`document_stack`) as a "Launch Readiness Notes" section in plain English.
 
 ## Seeding a Template
 

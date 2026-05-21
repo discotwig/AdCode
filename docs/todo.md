@@ -705,35 +705,51 @@ This is the most buyer-visible Tier 2 feature because it answers: **is the appro
 
 ---
 
-## Phase 29 — Schema Linting (ADR-017 Tier 2, build based on customer pain)
+## Phase 29 — Template Linting as Plan Feedback (ADR-023, JSON-first safety feature)
 
-Provider-aware rules beyond JSON Schema: valid objective/optimization goal/billing event combinations, pixel requirements, placement constraints. Deterministic and reproducible. See ADR-017.
+Deterministic linting beyond JSON Schema: catch valid-but-suspicious templates, scaffold leftovers, launch-readiness issues, and common operator mistakes. Linting supports the JSON-first authoring model from ADR-021 and keeps the simplified MCP surface from ADR-022 useful without adding new endpoints.
 
-This aligns with the governance mission, but should be driven by real pilot feedback so the first lint rules match the mistakes agencies actually need to prevent.
+The first version should be local, deterministic, conservative, and mostly non-blocking. Surface findings primarily through `plan_stack`, not through a new public MCP tool.
 
 ### Documentation
 
-- [ ] **Write `docs/schema-linting.md`** — document supported lint rules, how to suppress a rule, and how to contribute new rules
-- [ ] **Update ADR-017** — mark schema linting as deferred until customer discovery identifies the highest-value deterministic checks
+- [x] **Write `docs/schema-linting.md`** — document supported lint rules, severities, rule IDs, JSON path format, and how to add new rules
+- [x] **Update `docs/stack-authoring.md` if present** — explain how lint warnings fit into the `edit JSON -> plan_stack -> fix JSON` loop
+- [x] **Update README planning workflow** — mention that `plan_stack` reports schema errors, policy results, budget checks, and lint warnings together
+- [x] **Avoid documenting a public `lint_stack` MCP tool** — linting is plan feedback, not another endpoint
 
 ### Code
 
-- [ ] **Create `src/services/lint.py`** — schema linter
-  - `lint(template: dict) -> list[LintError]` — run all lint rules against the template; return structured errors
-  - `LintError` dataclass: `rule_id`, `path` (JSON pointer), `message`, `severity`
-  - Candidate initial rules:
-    - Objective/optimization goal compatibility matrix (e.g. `OUTCOME_SALES` requires `OFFSITE_CONVERSIONS` or `CONVERSIONS`)
-    - Objective/billing event compatibility matrix
-    - Pixel required when objective is `OUTCOME_SALES` or `OUTCOME_LEADS`
-    - `bid_amount` required when `bid_strategy` is `LOWEST_COST_WITH_BID_CAP`
-    - Mutually exclusive budget fields (`daily_budget` and `lifetime_budget` cannot both be set on the same ad set)
-- [ ] **Update `src/services/validate.py`** — call `lint()` before AI policy review; surface `LintError` results in `ValidationResult`; ERROR-severity lint errors set `is_pushable=False`
-- [ ] **Update `src/mcp_server.py`** — include lint errors in `validate_stack` and `plan_stack` output
-- [ ] **Feed lint results into Campaign Review Packet** — summarize deterministic configuration errors in plain English
+- [x] **Create `src/services/lint.py`** — deterministic template linter
+  - `lint_stack(template: dict) -> LintReport` — run all lint rules against the template
+  - `LintReport` dataclass/model with `findings`, severity counts, and helper formatting methods
+  - `LintFinding` dataclass/model: `rule_id`, `severity`, `path`, `message`, `suggestion`, optional `docs_ref`
+  - Severities: `info`, `warning`, `error`; initial rules should mostly be warnings
+- [x] **Implement placeholder/scaffold cleanup rules** — flag placeholder account IDs, Page IDs, image hashes, video IDs, URLs, `TODO`, `TBD`, and example domains
+- [x] **Implement budget sanity rules** — flag missing budget, confusing campaign/ad-set budget combinations, both `daily_budget` and `lifetime_budget` on one ad set, and lifetime budget without start/end dates
+- [x] **Implement launch-status safety rules** — warn when new resources without `fb_id` are marked `ACTIVE`
+- [x] **Implement `fb_id` hygiene rules** — flag duplicate `fb_id` values and suspicious copied IDs in scaffold-like templates
+- [x] **Implement duplicate/placeholder name rules** — flag exact duplicate sibling names and obvious placeholder names without normalizing or rewriting Facebook-returned name strings
+- [x] **Implement conservative creative completeness rules** — flag valid-but-incomplete link/video creative, placeholder destination URLs, missing CTA/headline/image/video review fields where applicable
+- [x] **Implement conservative objective/optimization/billing hints** — warn only on high-confidence mismatches; avoid trying to encode the full Meta compatibility matrix in v1
+- [x] **Integrate linting with `plan_stack`** — include a concise lint section with rule ID, severity, path, message, and suggested next action
+- [x] **Feed lint results into Campaign Review Packet** — summarize review warnings in non-technical language through `document_stack`
+- [x] **Run linting from `draft_stack` output if available** — return known placeholders, assumptions, ambiguities, and next edits alongside generated JSON
+- [x] **Keep linting out of live API paths** — lint rules must not call Facebook or require credentials
+- [x] **Do not add a public `lint_stack` MCP endpoint** — preserve ADR-022's simplified tool surface
 
 ### Tests
 
-- [ ] **`tests/test_lint.py`** — one test per lint rule: valid config passes, invalid config fails with correct rule ID and path; test `is_pushable` blocked by ERROR lint errors
+- [x] **`tests/test_lint.py` core model tests** — verify `LintReport`, severity counts, stable rule IDs, and JSON paths
+- [x] **Placeholder rule tests** — valid config passes; placeholder IDs/URLs/text produce expected warnings and paths
+- [x] **Budget rule tests** — missing/conflicting budget patterns produce expected findings
+- [x] **Launch-status rule tests** — new active resources warn; existing resources with `fb_id` are handled intentionally
+- [x] **`fb_id` hygiene tests** — duplicate IDs produce high-confidence findings
+- [x] **Name rule tests** — exact duplicates and placeholder names warn; unusual Unicode/name characters are preserved and not treated as encoding problems
+- [x] **Creative completeness tests** — incomplete but schema-valid creative produces warnings without blocking by default
+- [x] **Plan integration tests** — `plan_stack` output includes lint findings and remains the primary feedback path
+- [x] **Review packet integration tests** — `document_stack` summarizes lint findings in plain English
+- [x] **Non-live tests** — linting does not instantiate or call `MetaClient` and does not require credentials
 
 ---
 

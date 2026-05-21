@@ -20,6 +20,7 @@ from src.reconcile import DriftType, diff_state, fetch_actuals, format_report
 from src.services.ingest import extract_campaigns, format_ambiguity_report, read_excel
 from src.services.state import StateFile
 from src.services.budget import check_cap, format_budget_section
+from src.services.lint import lint_stack
 from src.services.validate import validate_all
 from src.traffic import apply as apply_plan
 from src.traffic import load_campaign_json, plan
@@ -272,7 +273,11 @@ async def _plan_stack(args: dict) -> list[TextContent]:
     budget_section = format_budget_section(p.budget_delta, cap_result, currency)
 
     diff_section = _format_plan(p) if len(p) > 0 else "No changes - Facebook already matches this configuration."
-    return [TextContent(type="text", text="\n".join([validation.summary(), "", diff_section, "", budget_section]))]
+    lint_report = lint_stack(campaign_json)
+    parts = [validation.summary(), "", diff_section, "", budget_section]
+    if not lint_report.is_empty():
+        parts += ["", lint_report.summary()]
+    return [TextContent(type="text", text="\n".join(parts))]
 
 
 async def _apply_stack(args: dict) -> list[TextContent]:
@@ -348,11 +353,14 @@ async def _draft_stack(args: dict) -> list[TextContent]:
     result = extract_campaigns(excel_data, ai_client)
     report = format_ambiguity_report(result)
 
-    output = {
+    draft_template = {
         "account_id": "act_000000000",
         "campaigns": result.campaigns,
     }
-    lines = [report, "", "Extracted campaign JSON:", json.dumps(output, indent=2)]
+    lint_report = lint_stack(draft_template)
+    lines = [report, "", "Extracted campaign JSON:", json.dumps(draft_template, indent=2)]
+    if not lint_report.is_empty():
+        lines += ["", "Draft lint notes:", lint_report.summary()]
     return [TextContent(type="text", text="\n".join(lines))]
 
 
@@ -370,6 +378,7 @@ async def _document_stack(args: dict) -> list[TextContent]:
     currency = os.environ.get("CURRENCY", "USD")
     cap_result = check_cap(p.budget_delta, campaign_json, cap)
 
+    lint_report = lint_stack(campaign_json)
     md = generate(
         template=campaign_json,
         state=state,
@@ -378,6 +387,7 @@ async def _document_stack(args: dict) -> list[TextContent]:
         plan=p,
         cap_result=cap_result if cap is not None else None,
         currency=currency,
+        lint_report=lint_report,
     )
     return [TextContent(type="text", text=md)]
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.services.budget import BudgetDelta, CapResult
+    from src.services.lint import LintReport
     from src.services.policy import PolicyViolation
     from src.services.state import StateFile
     from src.traffic import Plan
@@ -298,6 +299,35 @@ def _section_policy_results(violations: list[PolicyViolation]) -> str:
     return "\n".join(lines)
 
 
+def _section_lint_results(lint_report: LintReport) -> str:
+    from src.services.lint import LintSeverity
+
+    lines = ["## Launch Readiness Notes\n"]
+    errors = lint_report.errors
+    warnings = lint_report.warnings
+    infos = lint_report.infos
+
+    summary_parts = []
+    if errors:
+        summary_parts.append(f"{len(errors)} error(s)")
+    if warnings:
+        summary_parts.append(f"{len(warnings)} warning(s)")
+    if infos:
+        summary_parts.append(f"{len(infos)} info note(s)")
+    lines.append(", ".join(summary_parts) + "\n")
+
+    for finding in lint_report.findings:
+        if finding.severity == LintSeverity.ERROR:
+            prefix = "**Error**"
+        elif finding.severity == LintSeverity.WARNING:
+            prefix = "Warning"
+        else:
+            prefix = "Note"
+        lines.append(f"- {prefix} (`{finding.rule_id}` at `{finding.path}`): {finding.message} {finding.suggestion}")
+
+    return "\n".join(lines)
+
+
 def _section_campaign_hierarchy(template: dict, currency: str) -> str:
     lines = ["## Campaign Hierarchy\n"]
     campaigns = template.get("campaigns", [])
@@ -506,6 +536,7 @@ def generate(
     plan: Plan | None = None,
     cap_result: CapResult | None = None,
     currency: str = "USD",
+    lint_report: LintReport | None = None,
 ) -> str:
     sections = [
         _section_header(template),
@@ -519,6 +550,12 @@ def generate(
     sections += [
         _section_budget_impact(template, delta, cap_result, currency),
         _section_policy_results(violations),
+    ]
+
+    if lint_report and not lint_report.is_empty():
+        sections.append(_section_lint_results(lint_report))
+
+    sections += [
         _section_campaign_hierarchy(template, currency),
         _section_targeting_summary(template),
         _section_flight_dates(template),

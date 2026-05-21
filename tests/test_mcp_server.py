@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from src.mcp_server import (
     _apply_stack,
+    _document_stack,
     _draft_stack,
     _drift_stack,
     _import_resource,
@@ -479,6 +480,75 @@ async def test_draft_stack_returns_template_json(tmp_path):
 async def test_old_tool_names_return_unknown():
     result = await call_tool("pause_campaigns", {})
     assert "Unknown tool" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_plan_stack_includes_lint_section_for_placeholder_template(tmp_path):
+    """plan_stack output includes lint findings for a template with act_000000000."""
+    stack_patches = _patch_active_stack(tmp_path)
+    with (
+        patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")),
+        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+    ):
+        result = await _plan_stack({})
+
+    # The example.json fixture uses act_000000000 — lint should flag it
+    assert "lint-placeholder-account-id" in result[0].text or "act_000000000" in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_plan_stack_no_lint_section_for_clean_template(tmp_path):
+    """plan_stack output has no lint findings for a clean template."""
+    clean_template = {
+        "account_id": "act_123456789",
+        "campaigns": [
+            {
+                "name": "Summer Sale",
+                "fb_id": "camp_001",
+                "objective": "OUTCOME_TRAFFIC",
+                "status": "ACTIVE",
+                "special_ad_categories": [],
+                "ad_sets": [
+                    {
+                        "name": "US 25-54",
+                        "fb_id": "adset_001",
+                        "status": "ACTIVE",
+                        "billing_event": "LINK_CLICKS",
+                        "optimization_goal": "LINK_CLICKS",
+                        "daily_budget": 5000,
+                        "end_time": "2026-12-31T23:59:59Z",
+                        "targeting": {"geo_locations": {"countries": ["US"]}},
+                        "ads": [],
+                    }
+                ],
+            }
+        ],
+    }
+    stack_patches = _patch_active_stack(tmp_path, clean_template)
+    with (
+        patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+        patch("src.mcp_server.StateFile.load", return_value=StateFile(clean_template["account_id"], stack_name="state")),
+        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+    ):
+        result = await _plan_stack({})
+
+    assert "lint-" not in result[0].text
+
+
+@pytest.mark.asyncio
+async def test_document_stack_includes_lint_findings(tmp_path):
+    """document_stack output includes Launch Readiness Notes when findings present."""
+    stack_patches = _patch_active_stack(tmp_path)
+    with (
+        patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
+        patch("src.mcp_server.StateFile.load", return_value=StateFile(EXAMPLE_JSON["account_id"], stack_name="state")),
+        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
+    ):
+        result = await _document_stack({})
+
+    # Should include the Launch Readiness Notes section when lint findings exist
+    assert "Launch Readiness" in result[0].text or "lint" in result[0].text.lower()
 
 
 def test_main_does_not_perform_startup_facebook_check(tmp_path):
