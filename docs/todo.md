@@ -790,3 +790,212 @@ This is highly aligned with the governance mission, but is best built after ther
 ### Tests
 
 - [ ] **`tests/test_drift_monitor.py`** — test notification sent when drift exists; test no email sent when stack is clean; test email format includes drift item details
+
+---
+
+## Phase 32 — Workspace Registry and Registered Stacks (ADR-018 / ADR-019, foundational governance feature)
+
+Move AdCode from a single ambient active stack toward a workspace model where approved stacks are registered and selected by stable `stack_id` values. This is the highest-leverage next step for organizational MCP use because it supports operational safety, governance, explainability, and integration.
+
+The current `--config <stack_template>` local operator mode should continue working. The workspace registry should be introduced as an optional mode first, then become the preferred path for multi-stack and organizational workflows.
+
+### Product requirement
+
+- [ ] **Preserve local operator mode** — current one-stack `--config` workflow must remain simple for demos, development, and single-operator use
+- [ ] **Prevent arbitrary file/account combinations** — registered stacks should bind template path, state path, ad account ID, environment, and credential profile together
+- [ ] **Make environment explicit** — stack metadata should identify client, environment, platform, account ID, and operational risk level
+- [ ] **Support read-only discovery** — agents should be able to list and describe what AdCode is allowed to manage before planning or applying
+
+### Documentation
+
+- [ ] **Create `docs/workspace-registry.md`** — document workspace file format, registered stack metadata, local vs organizational mode, and migration path from `--config`
+- [ ] **Update README** — add a short note that current `--config` mode is local operator mode and registered stacks are the preferred direction for multi-environment use
+- [ ] **Update `docs/product-brief.md`** — reference registered stacks as the concrete mechanism behind operational safety and integration
+- [ ] **Update `docs/roadmap.md`** — mark workspace registry as the next foundational governance feature once implementation starts
+
+### Schema / config
+
+- [ ] **Create `schemas/workspace.schema.json`** — validate workspace registry files
+- [ ] **Define workspace file format** — include `version`, `workspace_id`, `default_mode`, and `stacks` map
+- [ ] **Define registered stack fields** — `stack_id`, `client`, `environment`, `platform`, `template_path`, `state_path`, `ad_account_id`, `credential_profile`, `allowed_operations`, `requires_confirmation`, `allow_deletes`
+- [ ] **Define path resolution rules** — relative paths resolve from workspace file directory; absolute paths allowed only for local/private use
+
+### Code
+
+- [ ] **Create `src/services/workspace.py`** — load, validate, and resolve workspace registry files
+- [ ] **Add `Workspace` and `RegisteredStack` models** — provide typed access to stack metadata and resolved paths
+- [ ] **Update `src/mcp_server.py` startup** — accept optional `--workspace <path>` in addition to current `--config <path>`
+- [ ] **Implement `list_stacks` MCP tool** — read-only; returns stack IDs, client, environment, platform, account ID, and allowed operations
+- [ ] **Implement `describe_stack(stack_id)` MCP tool** — read-only; returns resolved stack metadata without secrets
+- [ ] **Allow `validate_stack(stack_id?)` and `plan_stack(stack_id?)`** — if workspace mode is active, operate on the registered stack; if omitted in legacy mode, use the active stack
+- [ ] **Block unknown stack IDs** — fail closed with a clear error if an agent requests an unregistered stack
+- [ ] **Avoid exposing secrets** — never return tokens, app secrets, or credential values through workspace tools
+
+### Tests
+
+- [ ] **`tests/test_workspace.py`** — validate workspace schema, path resolution, duplicate stack IDs, missing stack files, and unknown stack lookup errors
+- [ ] **`tests/test_mcp_workspace_tools.py`** — test `list_stacks`, `describe_stack`, and stack-aware `validate_stack`/`plan_stack` with mocked providers
+- [ ] **Migration test** — verify existing `--config` local operator mode still starts and existing stack tools still work
+
+---
+
+## Phase 33 — Durable Plan Records and `apply_plan` (ADR-018 / ADR-019, safety and audit foundation)
+
+Make plans durable review artifacts instead of transient tool output. Applying changes in organizational mode should eventually require a previously generated `plan_id` that binds the operation to a registered stack, account ID, stack hash, state hash, generated timestamp, and changeset summary.
+
+This phase strengthens operational safety, governance, explainability, and future PR/approval workflows.
+
+### Product requirement
+
+- [ ] **Make plan review explicit** — users and agents should have a stable `plan_id` to reference during approval
+- [ ] **Bind apply to reviewed plan** — organizational mode should prefer `apply_plan(plan_id, ...)` over direct ambient `apply_stack`
+- [ ] **Detect stale plans** — applying a plan should fail or warn if the stack/state inputs changed since the plan was generated
+- [ ] **Preserve explainability** — plan records should include enough structured data for AI summaries, review packets, and audit logs
+
+### Documentation
+
+- [ ] **Create `docs/plan-records.md`** — document `plan_id`, plan storage, hash binding, expiration/staleness rules, and apply workflow
+- [ ] **Update ADR-004 or add follow-up ADR** — clarify that unified changesets become durable plan records in organizational mode
+- [ ] **Update README MCP tools table** — document `apply_plan` once implemented and explain relationship to `apply_stack`
+- [ ] **Update `docs/product-brief.md`** — identify durable plan records as the mechanism for safe agent-mediated approval
+
+### Schema / storage
+
+- [ ] **Create `schemas/plan.schema.json`** — schema for durable plan records
+- [ ] **Define plan storage location** — likely stack-local `.adcode/plans/<plan_id>.json` or workspace-level `.adcode/plans/`
+- [ ] **Define plan ID format** — stable, unique, non-secret identifier suitable for audit logs and user confirmation
+- [ ] **Record plan inputs** — stack ID, template path, state path, ad account ID, stack hash, state hash, generated timestamp, AdCode version if available
+- [ ] **Record plan summary** — creates, updates, deletes, delete count, budget impact, risk summary, policy result summary
+
+### Code
+
+- [ ] **Create `src/services/plans.py`** — create, persist, load, validate, and expire plan records
+- [ ] **Update `plan_stack`** — return a `plan_id` when plan persistence is enabled; preserve current human-readable plan output
+- [ ] **Implement `show_plan(plan_id)` MCP tool** — read-only; returns plan metadata, changeset, risk summary, and staleness status
+- [ ] **Implement `apply_plan(plan_id, confirmations...)` MCP tool** — load the plan, verify stack/account/hash bindings, enforce confirmations, then apply
+- [ ] **Keep `apply_stack` for local mode** — retain direct apply for current local workflow, but document it as less suitable for organizational mode
+- [ ] **Add staleness checks** — detect changed template/state files before applying a saved plan
+- [ ] **Add delete confirmation binding** — if deletes are present, confirmation should reference the plan ID and stack/account identity
+
+### Tests
+
+- [ ] **`tests/test_plan_records.py`** — test plan creation, plan loading, hash binding, stale plan detection, and missing plan errors
+- [ ] **`tests/test_apply_plan.py`** — test applying from a valid plan, blocking stale plans, blocking missing confirmations, and preserving local `apply_stack`
+- [ ] **MCP tests** — test `show_plan` and `apply_plan` tool responses with mocked Meta client
+
+---
+
+## Phase 34 — Domain Audit Log and Governance Events (ADR-018 / ADR-019, organizational trust feature)
+
+Add an AdCode-owned audit log for domain-specific events. External MCP gateways may audit tool calls, but AdCode still needs advertising-domain audit records that capture stack identity, account identity, plan IDs, confirmation values, and state-write results.
+
+This phase supports governance, operational safety, explainability, and future organizational deployments.
+
+### Product requirement
+
+- [ ] **Record mutation history** — every apply/import/state-changing operation should produce an audit event
+- [ ] **Record important live reads** — drift checks and import discovery should be auditable when they call Facebook
+- [ ] **Avoid secret leakage** — audit logs must redact tokens, app secrets, access tokens, and sensitive credential values
+- [ ] **Support local and organizational mode** — write local JSONL audit logs now; allow future gateway/user identity fields when available
+
+### Documentation
+
+- [ ] **Create `docs/audit-log.md`** — document event types, JSONL format, redaction rules, retention expectations, and local vs organizational use
+- [ ] **Update README** — mention AdCode domain audit events alongside Git history once implemented
+- [ ] **Update `docs/product-brief.md`** — describe audit logs as the governance mechanism for who changed what and what state was written
+
+### Schema / format
+
+- [ ] **Create `schemas/audit-event.schema.json`** — validate audit event records
+- [ ] **Define event types** — `plan_created`, `apply_started`, `apply_completed`, `apply_failed`, `drift_checked`, `import_started`, `import_completed`, `import_failed`
+- [ ] **Define common fields** — timestamp, event ID, caller identity if available, stack ID, client, environment, ad account ID, tool name, plan ID, result status
+- [ ] **Define redaction rules** — ensure no secrets or raw credentials are written
+
+### Code
+
+- [ ] **Create `src/services/audit.py`** — append-only JSONL audit writer with redaction and best-effort failure handling
+- [ ] **Add audit configuration** — support default local path such as `.adcode/audit.jsonl`; allow override by CLI/server arg or workspace config
+- [ ] **Instrument `plan_stack`** — emit `plan_created` when durable plan records are enabled
+- [ ] **Instrument `apply_stack` / `apply_plan`** — emit started/completed/failed events with changeset summary and state write result
+- [ ] **Instrument `drift_stack`** — emit drift check event including item count and account identity, not full sensitive payloads
+- [ ] **Instrument `import_resource`** — emit import events showing adopted resource type and IDs where safe
+- [ ] **Surface audit path in `show_stack` / `describe_stack`** — help operators know where governance records are written
+
+### Tests
+
+- [ ] **`tests/test_audit.py`** — test event write, redaction, append behavior, and schema validation
+- [ ] **Integration-style tests with mocked operations** — verify apply/drift/import emit expected audit events
+
+---
+
+## Phase 35 — Organizational MCP Readiness Hardening (ADR-018 / ADR-019, integration feature)
+
+Prepare AdCode to run cleanly behind approved AI clients, MCP gateways, or enterprise connector platforms without making the gateway the source of domain truth.
+
+This phase should come after the workspace registry, durable plan records, and audit log foundations are underway.
+
+### Product requirement
+
+- [ ] **Keep MCP as an interface layer** — core governance logic must remain usable from CLI/CI/future UI, not only MCP
+- [ ] **Accept caller context when available** — allow gateways to pass identity/session metadata, but do not require it for local mode
+- [ ] **Expose safe structured outputs** — tools should return machine-readable summaries that agents can explain without inventing facts
+- [ ] **Fail closed on policy uncertainty** — missing stack registration, account mismatch, stale plan, or missing confirmation should block mutation
+
+### Documentation
+
+- [ ] **Create `docs/organizational-deployment.md`** — describe local operator mode vs centralized MCP/gateway mode, credential boundaries, and recommended controls
+- [ ] **Document gateway compatibility expectations** — identity headers/context, tool-level RBAC, audit layering, and approved AI-client deployment patterns
+- [ ] **Update private integration notes if promoted later** — keep mainstream client setup docs private until verified and aligned with organizational safety model
+
+### Code
+
+- [ ] **Add optional caller context model** — capture user/session/client identity from MCP request context if the client/gateway provides it
+- [ ] **Thread caller context into audit events** — include user identity where available without breaking local mode
+- [ ] **Return structured tool results consistently** — include `status`, `stack_id`, `account_id`, `warnings`, and `next_actions` where useful
+- [ ] **Add account identity verification hook** — before mutating registered stacks, verify the live provider account matches the registered account when provider support exists
+- [ ] **Add read-only default mode for workspace server** — allow server startup in read-only mode where mutating tools fail closed
+- [ ] **Add capability reporting** — expose what operations are available in current local/workspace mode without exposing secrets
+
+### Tests
+
+- [ ] **MCP structured-output tests** — verify key tools return predictable fields for agent consumption
+- [ ] **Read-only mode tests** — verify mutating tools are blocked while read/plan tools still work
+- [ ] **Caller context tests** — verify optional user/session data flows into audit events when provided and is omitted safely when absent
+
+## Phase 36 — Minimal MCP Tool Surface (ADR-022, urgent simplification)
+
+Treat MCP endpoint simplicity as a product feature and safety boundary. Converge the Local Operator Mode tool list toward Terraform-like stack lifecycle verbs instead of exposing overlapping convenience endpoints.
+
+This phase should be prioritized before adding new MCP tools. New authoring, documentation, import, or validation capabilities should first try to fit into the simplified surface described by ADR-022.
+
+### Product requirement
+
+- [x] **Keep the public MCP tool list small** — optimize for obvious agent behavior over convenience endpoint count
+- [x] **Use `plan_stack` as the normal validation path** — users should edit JSON, run plan, fix issues, and plan again
+- [x] **Keep JSON as the primary UI** — authoring helpers should draft visible JSON, not hide desired state behind tools
+- [x] **Preserve stack-scoped IaC semantics** — no broad live Facebook account console behavior through MCP
+- [x] **Prefer resources/docs over tools for static information** — schema, examples, and authoring guidance should not become multiple tool endpoints
+
+### Documentation
+
+- [x] **Update README MCP tool table** — reflect the simplified target surface and any deprecated/renamed tools
+- [x] **Create `docs/stack-authoring.md`** — document JSON-first authoring, minimal valid stack shape, common enum values, recipes, and common mistakes
+- [x] **Document MCP tool addition criteria** — include ADR-022's checklist in developer-facing docs so future features do not expand the surface by default
+- [x] **Update examples and onboarding text** — make the default loop `edit JSON -> plan_stack -> apply_stack`
+
+### Code
+
+- [x] **Demote or remove `validate_stack` from the public MCP tool list** — keep validation internally, but make `plan_stack` the preferred feedback path
+- [x] **Fold `search_import_candidates` into `import_resource`** — add an explicit preview/list action so import discovery and import execution share one public verb
+- [x] **Replace `generate_stack_from_excel` with `draft_stack`** — preserve Excel support first, then allow future source types such as text briefs or recipes without adding new tools
+- [x] **Keep `draft_stack` non-mutating by default** — return draft JSON, assumptions, ambiguities, and next actions without calling Facebook or applying changes
+- [x] **Evaluate MCP resources for static authoring materials** — expose schema/docs/examples as resources if practical; otherwise keep them in docs without adding tools
+- [x] **Audit `src/mcp_server.py` tool descriptions** — make each remaining public tool's purpose and safety boundary explicit
+
+### Tests
+
+- [x] **Tool list snapshot test** — verify the public MCP tool list matches the simplified expected set
+- [x] **`plan_stack` validation-path tests** — verify schema/policy failures are surfaced clearly through `plan_stack`
+- [x] **`import_resource` preview tests** — verify preview mode lists candidates without writing template/state or calling live write APIs
+- [x] **`draft_stack` Excel compatibility tests** — verify existing Excel ingestion behavior is preserved under the new tool name
+- [x] **Non-mutation tests for authoring helpers** — verify draft/resource/documentation paths do not call Facebook write APIs

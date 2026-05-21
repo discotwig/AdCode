@@ -5,15 +5,13 @@ from unittest.mock import MagicMock, patch
 
 from src.mcp_server import (
     _apply_stack,
+    _draft_stack,
     _drift_stack,
-    _generate_stack_from_excel,
     _import_resource,
     _load_stack_config,
     _plan_stack,
-    _search_import_candidates,
     _show_stack,
     _show_state,
-    _validate_stack,
     call_tool,
     list_tools,
     main,
@@ -95,14 +93,12 @@ async def test_list_tools_is_strict_iac_surface():
 
     assert names == {
         "show_stack",
-        "validate_stack",
+        "draft_stack",
         "plan_stack",
         "apply_stack",
         "drift_stack",
         "show_state",
-        "search_import_candidates",
         "import_resource",
-        "generate_stack_from_excel",
         "document_stack",
     }
 
@@ -124,6 +120,9 @@ async def test_list_tools_excludes_broad_live_console_surface():
         "get_drift_report",
         "import_adsets",
         "ingest_excel",
+        "validate_stack",
+        "search_import_candidates",
+        "generate_stack_from_excel",
     }
     assert names.isdisjoint(retired)
 
@@ -178,21 +177,6 @@ async def test_show_stack_reports_active_local_paths(tmp_path):
     assert data["template_path"].endswith("test_stack_template.json")
     assert data["state_path"].endswith("state.json")
     assert "credentials" not in data
-
-
-@pytest.mark.asyncio
-async def test_validate_stack_does_not_call_meta(tmp_path):
-    meta = _make_meta_client()
-    stack_patches = _patch_active_stack(tmp_path)
-    with (
-        patch("src.mcp_server._get_ai_client", return_value=_make_ai_client()),
-        patch("src.mcp_server._get_meta_client", return_value=meta),
-        stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
-    ):
-        result = await _validate_stack({})
-
-    assert "Pushable" in result[0].text
-    meta.list_campaigns.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -416,7 +400,7 @@ async def test_drift_stack_filters_unmanaged_live_objects(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_search_import_candidates_only_returns_adsets_under_declared_campaigns(tmp_path):
+async def test_import_resource_preview_lists_candidates_without_writing(tmp_path):
     state = StateFile("act_123", stack_name="state")
     state.upsert_campaign("Parent Campaign", "camp_001", {"name": "Parent Campaign", "status": "PAUSED"})
     meta = _make_meta_client()
@@ -427,18 +411,23 @@ async def test_search_import_candidates_only_returns_adsets_under_declared_campa
         patch("src.mcp_server.StateFile.load", return_value=state),
         stack_patches[0], stack_patches[1], stack_patches[2], stack_patches[3],
     ):
-        result = await _search_import_candidates({"resource_type": "adset"})
+        result = await _import_resource({"resource_type": "adset", "preview": True})
 
     data = json.loads(result[0].text)
     assert data["count"] == 2
     assert {item["name"] for item in data["candidates"]} == {"Ad Set A", "Ad Set B"}
     assert "Outside Ad Set" not in result[0].text
     meta.list_adsets.assert_called_once_with("camp_001")
+    # preview must not modify template or state
+    template_on_disk = json.loads((tmp_path / "test_stack_template.json").read_text(encoding="utf-8"))
+    assert template_on_disk["campaigns"][0]["ad_sets"] == []
+    state.save = MagicMock()
+    state.save.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_search_import_candidates_rejects_unsupported_type(tmp_path):
-    result = await _search_import_candidates({"resource_type": "campaign"})
+async def test_import_resource_preview_rejects_unsupported_type():
+    result = await _import_resource({"resource_type": "campaign", "preview": True})
     assert "Only resource_type='adset'" in result[0].text
 
 
@@ -471,7 +460,7 @@ async def test_import_resource_rejects_unsupported_type():
 
 
 @pytest.mark.asyncio
-async def test_generate_stack_from_excel_returns_template_json(tmp_path):
+async def test_draft_stack_returns_template_json(tmp_path):
     result_obj = MagicMock()
     result_obj.campaigns = [{"name": "Generated Campaign", "objective": "REACH", "status": "PAUSED", "ad_sets": []}]
     with (
@@ -480,7 +469,7 @@ async def test_generate_stack_from_excel_returns_template_json(tmp_path):
         patch("src.mcp_server.extract_campaigns", return_value=result_obj),
         patch("src.mcp_server.format_ambiguity_report", return_value="No ambiguities."),
     ):
-        result = await _generate_stack_from_excel({"excel_path": str(tmp_path / "brief.xlsx")})
+        result = await _draft_stack({"excel_path": str(tmp_path / "brief.xlsx")})
 
     assert "Generated Campaign" in result[0].text
     assert "Extracted campaign JSON" in result[0].text

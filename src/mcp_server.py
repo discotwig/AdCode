@@ -87,14 +87,6 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
-            name="validate_stack",
-            description=(
-                "Validate the active stack template with JSON Schema and AI policy checks. "
-                "Does not call Facebook and does not change local files."
-            ),
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
             name="plan_stack",
             description=(
                 "Validate the active stack and show the changeset needed to make Facebook match the template. "
@@ -143,31 +135,13 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="search_import_candidates",
-            description=(
-                "Search for supported live resources that can be adopted into the active stack. "
-                "Currently supports resource_type='adset'. Returns ad sets live on Facebook under "
-                "each stack campaign that has an fb_id in the template but is not yet listed in that "
-                "campaign's ad_sets (matched by fb_id or name)."
-            ),
-            inputSchema={
-                "type": "object",
-                "required": ["resource_type"],
-                "properties": {
-                    "resource_type": {
-                        "type": "string",
-                        "description": "Resource type to search. Currently only 'adset' is supported.",
-                    },
-                },
-            },
-        ),
-        Tool(
             name="import_resource",
             description=(
-                "Adopt a supported live resource into the active stack template and state file. "
-                "Currently supports resource_type='adset'. Discovers live ad sets via each template "
-                "campaign's fb_id (not Facebook campaign name drift). This writes local files only "
-                "and never pushes changes to Facebook."
+                "Adopt or preview importable live resources for the active stack. "
+                "Use preview=true to list importable candidates without modifying the template or state. "
+                "Omit preview (or set false) to adopt the candidates into the template and state. "
+                "Currently supports resource_type='adset' only. Discovers ad sets via each template "
+                "campaign's fb_id. Writes local files only; never pushes changes to Facebook."
             ),
             inputSchema={
                 "type": "object",
@@ -182,14 +156,19 @@ async def list_tools() -> list[Tool]:
                         "items": {"type": "string"},
                         "description": "Optional subset of resource names to import.",
                     },
+                    "preview": {
+                        "type": "boolean",
+                        "description": "If true, list importable candidates without modifying the template or state.",
+                    },
                 },
             },
         ),
         Tool(
-            name="generate_stack_from_excel",
+            name="draft_stack",
             description=(
-                "Extract campaign JSON from an Excel brief using AI and flag ambiguities for review. "
-                "Returns a starter stack template; it does not call Facebook."
+                "Produce a starter JSON template from an Excel brief using AI. "
+                "Returns draft JSON with extracted campaign definitions and flagged ambiguities. "
+                "Does not call Facebook or write any files."
             ),
             inputSchema={
                 "type": "object",
@@ -221,8 +200,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         if name == "show_stack":
             return await _show_stack(arguments)
-        if name == "validate_stack":
-            return await _validate_stack(arguments)
         if name == "plan_stack":
             return await _plan_stack(arguments)
         if name == "apply_stack":
@@ -231,12 +208,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _drift_stack(arguments)
         if name == "show_state":
             return await _show_state(arguments)
-        if name == "search_import_candidates":
-            return await _search_import_candidates(arguments)
         if name == "import_resource":
             return await _import_resource(arguments)
-        if name == "generate_stack_from_excel":
-            return await _generate_stack_from_excel(arguments)
+        if name == "draft_stack":
+            return await _draft_stack(arguments)
         if name == "document_stack":
             return await _document_stack(arguments)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -281,13 +256,6 @@ async def _show_stack(args: dict) -> list[TextContent]:
         "configured": True,
     }
     return [TextContent(type="text", text=json.dumps(data, indent=2))]
-
-
-async def _validate_stack(args: dict) -> list[TextContent]:
-    json_path, _, _ = _require_stack_config()
-    campaign_json = _resolve_campaign_json()
-    validation = validate_all(campaign_json, _get_ai_client(), stack_dir=json_path.parent)
-    return [TextContent(type="text", text=validation.summary())]
 
 
 async def _plan_stack(args: dict) -> list[TextContent]:
@@ -373,7 +341,7 @@ async def _drift_stack(args: dict) -> list[TextContent]:
     return [TextContent(type="text", text=format_report(report))]
 
 
-async def _generate_stack_from_excel(args: dict) -> list[TextContent]:
+async def _draft_stack(args: dict) -> list[TextContent]:
     excel_path = args["excel_path"]
     ai_client = _get_ai_client()
     excel_data = read_excel(excel_path)
@@ -493,25 +461,20 @@ def _missing_template_adsets(meta: MetaClient, campaign_json: dict) -> list[dict
     return candidates
 
 
-async def _search_import_candidates(args: dict) -> list[TextContent]:
-    if args.get("resource_type") not in SUPPORTED_IMPORT_RESOURCE_TYPES:
-        return _unsupported_resource_message()
-
-    campaign_json = _resolve_campaign_json()
-    meta = _get_meta_client()
-    candidates = _missing_template_adsets(meta, campaign_json)
-
-    result = {
-        "resource_type": "adset",
-        "count": len(candidates),
-        "candidates": [{k: v for k, v in c.items() if k != "live"} for c in candidates],
-    }
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-
 async def _import_resource(args: dict) -> list[TextContent]:
     if args.get("resource_type") not in SUPPORTED_IMPORT_RESOURCE_TYPES:
         return _unsupported_resource_message()
+
+    if args.get("preview"):
+        campaign_json = _resolve_campaign_json()
+        meta = _get_meta_client()
+        candidates = _missing_template_adsets(meta, campaign_json)
+        result = {
+            "resource_type": "adset",
+            "count": len(candidates),
+            "candidates": [{k: v for k, v in c.items() if k != "live"} for c in candidates],
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     json_path, _, account_id = _require_stack_config()
     name_filter = set(args["names"]) if args.get("names") else None

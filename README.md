@@ -35,11 +35,24 @@ AdCode is designed around five advertising-governance priorities:
 
 The product story is: give your company's AI agents a safe, governed way to operate Meta Ads from approved campaign definitions. MCP is the first interface, not the product boundary.
 
-See [ADR-018](docs/decisions/018-adcode-as-governance-layer.md) and [ADR-019](docs/decisions/019-product-pillars.md) for the design rationale.
+See [ADR-018](docs/decisions/018-adcode-as-governance-layer.md), [ADR-019](docs/decisions/019-product-pillars.md), and [ADR-020](docs/decisions/020-mcp-connection-modes.md) for the design rationale.
+
+## Deployment Options
+
+AdCode has two intended deployment modes:
+
+| Mode | Use case | Connection model |
+| --- | --- | --- |
+| **Local Operator Mode** | Personal development, informal demos, and single-operator client service work. | A local MCP client such as Cursor launches `src/mcp_server.py` over `stdio` with `--config <stack_template>`. No hosting or tunnel is required. |
+| **Organizational Hosted Mode** | Formal cloud-agent demos, multi-user organizational use, paid hosted services, and client-hosted implementations. | AdCode runs as a hosted MCP service or behind an authenticated gateway/enterprise connector. Cloud clients connect over HTTPS to approved registered stacks. |
+
+Temporary tunnels such as `ngrok` are useful only for engineering tests. They are not the recommended model for formal demos, customer use, or production operations.
+
+See [ADR-020](docs/decisions/020-mcp-connection-modes.md) for the connection-mode decision.
 
 ## Current Model
 
-AdCode is built for a contractor/operator workflow today. Clients submit campaign templates by email. The hosted email bot validates and routes submissions, but it does not hold Facebook credentials or run the apply engine. The operator runs the MCP server locally against one stack at a time.
+AdCode is built for a contractor/operator workflow today. Clients submit campaign templates by email. The hosted email bot validates and routes submissions, but it does not hold Facebook credentials or run the apply engine. The operator runs the MCP server locally against one stack at a time using Local Operator Mode.
 
 That split is intentional:
 
@@ -48,7 +61,7 @@ That split is intentional:
 - state stays with the Git repository;
 - a human reviews the plan before campaigns are pushed.
 
-See [ADR-008](docs/decisions/008-contractor-service-model.md), [ADR-010](docs/decisions/010-mailroom-engine-split.md), and [ADR-014](docs/decisions/014-stack-level-env.md) for the design rationale.
+See [ADR-008](docs/decisions/008-contractor-service-model.md), [ADR-010](docs/decisions/010-mailroom-engine-split.md), and [ADR-014](docs/decisions/014-stack-level-env.md) for the current service model rationale.
 
 ## Core Concepts
 
@@ -129,7 +142,7 @@ The Facebook account ID lives in the stack template as `account_id`; it does not
 python src/mcp_server.py --config customers/acme-marketing/acme-marketing_v1/acme-marketing_v1_template.json
 ```
 
-Startup only loads and validates local stack configuration. Provider credentials are used when a provider-backed tool such as `apply_stack`, `drift_stack`, `search_import_candidates`, or `import_resource` runs.
+Startup only loads and validates local stack configuration. Provider credentials are used when a provider-backed tool such as `apply_stack`, `drift_stack`, or `import_resource` runs.
 
 The legacy `--skip-connection-check` flag is accepted for existing local scripts, but startup no longer performs a live Facebook connection check.
 
@@ -169,20 +182,29 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 
 ## MCP Tools
 
+The MCP surface is intentionally small — a Terraform-like set of stack lifecycle verbs. See [ADR-022](docs/decisions/022-minimal-mcp-tool-surface.md) and [docs/stack-authoring.md](docs/stack-authoring.md) for the design rationale.
+
+The normal operator loop is:
+
+```text
+draft_stack (seed from Excel) → edit JSON → plan_stack → apply_stack
+drift_stack / show_state / import_resource / document_stack as needed
+```
+
 | Tool | Description |
 | --- | --- |
-| `show_stack` | Show the active stack template, state path, account ID, and local configuration status. |
-| `validate_stack` | Validate the active stack template: JSON Schema, deterministic policy rules (`policies/`), and AI policy review. Does not call Facebook. |
-| `plan_stack` | Validate the active stack and show creates, updates, and deletes without changing Facebook. Includes a budget delta summary and cap check if `ACCOUNT_BUDGET_CAP` is set. |
-| `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require explicit confirmation. |
-| `drift_stack` | Compare managed stack state to live Facebook data. Unmanaged account objects are intentionally excluded. |
-| `show_state(campaign_name?)` | Read this stack's `state.json`; does not call Facebook. |
-| `search_import_candidates(resource_type)` | Find unmanaged live resources that belong under campaigns declared in the active stack. Currently supports `resource_type="adset"`. |
-| `import_resource(resource_type, names?)` | Adopt supported live resources into the stack template and state. Currently supports ad sets only. |
-| `generate_stack_from_excel(excel_path)` | Extract campaign JSON from an Excel brief using AI and flag ambiguities. |
+| `show_stack` | Show the active stack template path, state path, account ID, and local `.env` status. Read-only; no Facebook call. |
+| `draft_stack(excel_path)` | Produce a starter JSON template from an Excel brief using AI. Returns draft JSON with flagged ambiguities. Does not call Facebook or write state. |
+| `plan_stack` | Validate the active stack (schema, policy rules, AI review) and show the full changeset. The normal validation feedback path — run this before every apply. Includes budget delta and cap check when `ACCOUNT_BUDGET_CAP` is set. |
+| `apply_stack(confirm_deletes?)` | Apply the active stack to Facebook and update local state. Deletes require a second call with `confirm_deletes=true` after reviewing the plan. |
+| `drift_stack` | Compare managed stack state to live Facebook data. Reports only stack-managed objects; unmanaged account objects are intentionally excluded. |
+| `show_state(campaign_name?)` | Read this stack's `state.json`. Does not call Facebook. |
+| `import_resource(resource_type, names?, preview?)` | Adopt live resources into the stack template and state. Use `preview=true` to list importable candidates before committing. Currently supports `resource_type="adset"` only. |
 | `document_stack` | Generate a Campaign Review Packet — a Markdown report for non-technical review showing planned changes, budget impact, policy results, targeting summary, flight dates, and an approval recommendation. Does not call Facebook. |
 
 ## Architecture
+
+Current local/operator architecture:
 
 ```text
 Client template or Excel brief
@@ -195,8 +217,9 @@ Email mailroom on Fly.io
         |
         v
 Operator local machine
+  - local MCP client over stdio
   - stack folder with template, .env, state.json
-  - MCP server scoped to one stack
+  - MCP server scoped to one stack by --config
         |
         v
 Plan/apply engine
@@ -212,6 +235,8 @@ Meta provider -> Facebook Marketing API
 state.json + template fb_id updates -> Git commit
 ```
 
+Future organizational hosted deployments use the same engine behind a hosted MCP endpoint, registered stacks, and additional governance controls.
+
 For more detail, see [docs/architecture.md](docs/architecture.md).
 
 Related design docs:
@@ -223,6 +248,7 @@ Related design docs:
 - [Architecture decisions](docs/decisions/README.md)
 - [AdCode as a governance layer](docs/decisions/018-adcode-as-governance-layer.md)
 - [Product pillars](docs/decisions/019-product-pillars.md)
+- [Supported MCP connection modes](docs/decisions/020-mcp-connection-modes.md)
 
 ## Repository Layout
 
