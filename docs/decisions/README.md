@@ -6,6 +6,7 @@ This directory records design decisions made while AdCode evolved. Some older AD
 
 | ADR | Summary |
 | --- | --- |
+| [024](024-local-macos-cursor-poc.md) | Local macOS/Cursor POC: credential-free bootstrap, private workspace setup, enforced inspect/planning modes, and release-pinned projects; hardware validation pending. |
 | [023](023-template-linting-as-plan-feedback.md) | Deterministic template linting improves JSON-first authoring through plan feedback without adding MCP endpoint sprawl. |
 | [022](022-minimal-mcp-tool-surface.md) | MCP tool simplicity is a Terraform-like product feature and safety boundary; consolidate overlapping endpoints. |
 | [021](021-json-first-template-authoring.md) | JSON remains a primary UI, but users should start from scaffolded/generated drafts; avoid MCP endpoint bloat for authoring support. |

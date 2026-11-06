@@ -140,8 +140,10 @@ class TestCampaignSchema:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(example_campaign, campaign_schema)
 
-    def test_missing_creative_fails(self, campaign_schema, example_campaign):
-        del example_campaign["campaigns"][0]["ad_sets"][0]["ads"][0]["creative"]
+    def test_new_ad_missing_creative_fails(self, campaign_schema, example_campaign):
+        ad = example_campaign["campaigns"][0]["ad_sets"][0]["ads"][0]
+        ad.pop("fb_id", None)
+        del ad["creative"]
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(example_campaign, campaign_schema)
 

@@ -1015,3 +1015,17 @@ This phase should be prioritized before adding new MCP tools. New authoring, doc
 - [x] **`import_resource` preview tests** — verify preview mode lists candidates without writing template/state or calling live write APIs
 - [x] **`draft_stack` Excel compatibility tests** — verify existing Excel ingestion behavior is preserved under the new tool name
 - [x] **Non-mutation tests for authoring helpers** — verify draft/resource/documentation paths do not call Facebook write APIs
+
+## Phase 37 — Local macOS / Cursor POC (ADR-024)
+
+- [x] Document user-local installer and four global tools (`create_workspace`, `list_workspaces`, `check_workspace`, `open_workspace`); creation uses friendly `customer_name` and optional `workspace_name`, not slugs/account IDs in chat.
+- [x] Document blank private `.env` with manual owner editing primary and Configure helper optional, unfinished draft (`account_id: ""`, `campaigns: []`), local-check account binding after valid settings, and planning `--onboarding` key refresh without restart.
+- [x] Distinguish prepared/recognized configuration and launch requests from actual active MCP/provider verification; preserve Cursor permissions/approvals without bypass or automatic mode escalation. Older projects remain pinned unchanged; missing guided metadata returns `upgrade_required`.
+- [x] Document legacy operator compatibility, release-pinned projects, retained releases/rollback, data-processing costs, and incomplete approval/audit boundaries.
+- [x] Record historical public-allowlisted bundle/root-launcher, executable-permission and Unix-line-ending checks; see `docs/local-poc-validation.md`, not a fresh guided-onboarding packaging result.
+- [x] Preserve historical Windows (555 passed, 25 skipped) and Python 3.13 Linux runtime/local-MCP (184 passed) results in `docs/local-poc-validation.md`; these are not current rerun counts.
+- [x] Record full Windows `python -m pytest -q`: **563 passed, 25 skipped**; clean Linux Python **3.13.18** fresh hash-locked bundle runtime, nine selected local/MCP files including guided access and real guided stdio: **249 passed, no skips**, no provider calls. Isolated non-root Docker used read-only public inputs only; container/temporary-tree cleanup confirmed. See `docs/local-poc-validation.md` for scope.
+- [x] Document optional Configure helper support for unbound guided drafts as well as bound workspaces; local-check binding and account-conflict guards remain in force.
+- [ ] Rebuild and verify archive integrity, public-file allowlist, permissions, and checksum after documentation changes.
+- [ ] Validate on actual Intel/Apple Silicon macOS hardware, including Gatekeeper approval, install/update, Tk/TTY setup, and Cursor UX; hardware unavailable in this pass.
+- [ ] Implement durable plan records and approval binding separately (Phase 33); do not infer these from the POC.

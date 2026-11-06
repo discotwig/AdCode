@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import anthropic
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 
 from src.api.meta import MetaClient
 from src.reconcile import DriftType, diff_state, fetch_actuals, format_report
@@ -29,7 +30,34 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Server("adcode")
+app = Server("adcode", instructions=(
+    "Help the user describe and review advertising in ordinary language. Edit local campaign "
+    "files from their brief; never invent budgets, targeting, identifiers or campaign details. "
+    "Credentials belong in the local .env, never in chat or file-reading/terminal tools. "
+    "An unfinished draft is not a campaign or a connected account. Local setup checks never "
+    "verify providers. Saved state is not live Facebook. Preserve tool approvals and access mode."
+))
+
+# Legacy operator invocations retain their existing surface. Distributed clients
+# explicitly request a restricted mode, enforced at discovery AND dispatch.
+_ACCESS_MODE = "operator"
+_ONBOARDING_MODE = False
+_ACCESS_TOOLS = {
+    "inspect": frozenset({"show_stack", "show_state"}),
+    "planning": frozenset({"show_stack", "show_state", "plan_stack", "document_stack"}),
+}
+_STACK_ENV_KEYS = frozenset({
+    "FB_APP_ID", "FB_APP_SECRET", "FB_ACCESS_TOKEN", "FB_ACCOUNT_ID",
+    "ANTHROPIC_API_KEY", "ACCOUNT_BUDGET_CAP", "CURRENCY",
+})
+
+
+class OnboardingError(ValueError):
+    """Only our fixed, non-secret messages may cross the onboarding boundary."""
+
+
+def _tool_allowed(name: str) -> bool:
+    return _ACCESS_MODE == "operator" or name in _ACCESS_TOOLS.get(_ACCESS_MODE, ())
 
 # Set once at startup by _load_stack_config via --config <stack>_template.json.
 # All tool handlers read these globals instead of accepting json_path per call.
@@ -41,6 +69,11 @@ SUPPORTED_IMPORT_RESOURCE_TYPES = {"adset"}
 
 
 def _get_meta_client() -> MetaClient:
+    if not all(os.environ.get(key) for key in ("FB_APP_ID", "FB_APP_SECRET", "FB_ACCESS_TOKEN", "FB_ACCOUNT_ID")):
+        raise ValueError(
+            "Meta credentials are missing. Run Configure AdCode.command locally and restart "
+            "the stack's MCP connection. Never paste credentials into chat."
+        )
     return MetaClient(
         app_id=os.environ["FB_APP_ID"],
         app_secret=os.environ["FB_APP_SECRET"],
@@ -50,20 +83,97 @@ def _get_meta_client() -> MetaClient:
 
 
 def _get_ai_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    if _ONBOARDING_MODE and not _local_settings_entered():
+        raise OnboardingError("Fill in the missing values in .env privately, save, then ask me to check setup. Never paste keys into chat.")
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise ValueError(
+            "The Anthropic API key is missing. Run Configure AdCode.command locally and restart "
+            "the stack's MCP connection. Never paste credentials into chat."
+        )
+    return anthropic.Anthropic(api_key=key)
+
+
+def _local_settings_entered() -> bool:
+    from src.local_setup import REQUIRED_KEYS, CURRENCIES
+    return (all(os.environ.get(key) for key in REQUIRED_KEYS)
+            and bool(re.fullmatch(r"[0-9]+", os.environ.get("ACCOUNT_BUDGET_CAP", "")))
+            and os.environ.get("CURRENCY") in CURRENCIES
+            and bool(re.fullmatch(r"[0-9]+", os.environ.get("FB_APP_ID", "")))
+            and os.environ.get("FB_ACCOUNT_ID") == _ACCOUNT_ID
+            and bool(_ACCOUNT_ID))
+
+
+def _refresh_onboarding() -> None:
+    """Reload keys only from this local workspace; its account can bind only once."""
+    global _ACCOUNT_ID
+    if not _ONBOARDING_MODE or _STACK_JSON_PATH is None:
+        return
+    from src.local_setup import _env_values, safe_path
+    from src.services.workspace import _account, _placeholder
+    for key in _STACK_ENV_KEYS:
+        os.environ.pop(key, None)
+    try:
+        data = json.loads(safe_path(_STACK_JSON_PATH).read_text(encoding="utf-8"))
+        account = data.get("account_id")
+    except Exception:
+        raise OnboardingError("Your campaign file is unfinished or being edited. Save it and try again.") from None
+    if not account:
+        if _ACCOUNT_ID:
+            raise OnboardingError("The account was removed from this campaign file. Review it locally before continuing.")
+        return  # The global setup check binds a fresh draft after local entry.
+    if not isinstance(account, str) or _account(account) != account:
+        raise OnboardingError("The advertising account in this campaign file needs local review.")
+    if _ACCOUNT_ID and account != _ACCOUNT_ID:
+        raise OnboardingError("Template account changed; reopen the intended workspace before continuing.")
+    try:
+        values = _env_values(safe_path(_STACK_JSON_PATH.parent / ".env"))
+    except Exception:
+        raise OnboardingError("Your private .env needs attention. Review it locally, save, and ask me to check again.") from None
+    entered_account = _account(values.get("FB_ACCOUNT_ID"))
+    if entered_account is None:
+        raise OnboardingError("Fill in the advertising account in .env privately, save, then ask me to check setup.")
+    if entered_account != account:
+        raise OnboardingError("The local account settings do not match this workspace. Review them privately; no provider was contacted.")
+    _ACCOUNT_ID = account
+    for key in _STACK_ENV_KEYS - {"FB_ACCOUNT_ID"}:
+        value = values.get(key)
+        if (isinstance(value, str) and value and not _placeholder(value)
+                        and not any(ord(c) < 32 or ord(c) == 127 for c in value)):
+            os.environ[key] = value
+    os.environ["FB_ACCOUNT_ID"] = account
 
 
 def _require_stack_config() -> tuple[Path, Path, str]:
+    _refresh_onboarding()
+    if _ONBOARDING_MODE and not _ACCOUNT_ID:
+        raise OnboardingError("First fill in .env privately and ask me to check your workspace. Then we can prepare your campaign.")
     if _STACK_JSON_PATH is None or _STACK_STATE_DIR is None or not _ACCOUNT_ID:
         raise ValueError(
             "MCP server not configured with a stack. "
             "Start with: python src/mcp_server.py --config <stack>_template.json"
         )
+    # An editor can change files while the MCP process is alive. Never silently
+    # operate on a different account with credentials loaded for the original one.
+    with _STACK_JSON_PATH.open(encoding="utf-8") as stream:
+        template = json.load(stream)
+    if template.get("account_id") != _ACCOUNT_ID:
+        raise ValueError("Template account changed; restart with the intended stack before continuing.")
+    state_path = _STACK_STATE_DIR / "state.json"
+    if state_path.exists():
+        with state_path.open(encoding="utf-8") as stream:
+            if json.load(stream).get("account_id") != _ACCOUNT_ID:
+                raise ValueError("State account does not match the configured stack.")
     return _STACK_JSON_PATH, _STACK_STATE_DIR, _ACCOUNT_ID
 
 
 def _resolve_campaign_json() -> dict:
     json_path, _, _ = _require_stack_config()
+    if _ONBOARDING_MODE:
+        with json_path.open(encoding="utf-8") as stream:
+            draft = json.load(stream)
+        if draft.get("campaigns") == []:
+            raise OnboardingError("Your campaign brief is still empty. What are you promoting, what is your budget, and when should it run?")
     return load_campaign_json(str(json_path))
 
 
@@ -79,7 +189,7 @@ def _load_state(account_id: str) -> StateFile:
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
-    return [
+    tools = [
         Tool(
             name="show_stack",
             description=(
@@ -206,6 +316,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
     ]
+    return [tool for tool in tools if _tool_allowed(tool.name)]
 
 
 # ------------------------------------------------------------------
@@ -214,7 +325,12 @@ async def list_tools() -> list[Tool]:
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:
+    if not _tool_allowed(name):
+        return CallToolResult(isError=True, content=[TextContent(
+            type="text",
+            text="Blocked by the locally configured access mode. No provider call or state change was made.",
+        )])
     arguments = arguments or {}
     try:
         if name == "show_stack":
@@ -237,6 +353,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _document_stack(arguments)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as exc:
+        if _ONBOARDING_MODE:
+            # Provider exceptions can contain headers or supplied values. Never
+            # return or log their raw text while handling manually entered keys.
+            logger.warning("Local workspace operation failed (%s).", type(exc).__name__)
+            message = (str(exc) if isinstance(exc, OnboardingError) else
+                       "I couldn't complete that review. Check your local settings and campaign files, then try again. No ad changes were made.")
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=message)])
         logger.exception("Tool %s failed", name)
         return [TextContent(type="text", text=f"Error: {exc}")]
 
@@ -268,6 +391,28 @@ def _format_plan(p) -> str:
 
 
 async def _show_stack(args: dict) -> list[TextContent]:
+    if _ONBOARDING_MODE and _STACK_JSON_PATH is not None:
+        message = "Your draft is prepared. Enter your settings in .env privately, then ask me to check setup."
+        try:
+            _refresh_onboarding()
+            if _ACCOUNT_ID:
+                message = "Local account settings are bound to this workspace. No provider connection has been verified."
+        except OnboardingError as exc:
+            message = str(exc)
+        data = {
+            "template_path": str(_STACK_JSON_PATH),
+            "stack_dir": str(_STACK_JSON_PATH.parent),
+            "state_path": str(_STACK_JSON_PATH.parent / "state.json"),
+            "env_path": str(_STACK_JSON_PATH.parent / ".env"),
+            "env_exists": (_STACK_JSON_PATH.parent / ".env").is_file(),
+            "account_id": _ACCOUNT_ID or None,
+            "configured": bool(_ACCOUNT_ID),
+            "access_mode": _ACCESS_MODE,
+            "credentials_entered": _local_settings_entered(),
+            "provider_connection_verified": False,
+            "message": message,
+        }
+        return [TextContent(type="text", text=json.dumps(data, indent=2))]
     json_path, state_dir, account_id = _require_stack_config()
     data = {
         "template_path": str(json_path),
@@ -277,6 +422,7 @@ async def _show_stack(args: dict) -> list[TextContent]:
         "env_exists": (state_dir / ".env").exists(),
         "account_id": account_id,
         "configured": True,
+        "access_mode": _ACCESS_MODE,
     }
     return [TextContent(type="text", text=json.dumps(data, indent=2))]
 
@@ -284,6 +430,7 @@ async def _show_stack(args: dict) -> list[TextContent]:
 async def _plan_stack(args: dict) -> list[TextContent]:
     json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
+
     validation = validate_all(
         campaign_json, _get_ai_client(), stack_dir=json_path.parent
     )
@@ -525,6 +672,7 @@ async def _document_stack(args: dict) -> list[TextContent]:
 
     json_path, _, _ = _require_stack_config()
     campaign_json = _resolve_campaign_json()
+
     validation = validate_all(
         campaign_json, _get_ai_client(), stack_dir=json_path.parent
     )
@@ -728,15 +876,43 @@ def _load_stack_config(template_path: str) -> None:
     global _STACK_JSON_PATH, _STACK_STATE_DIR, _ACCOUNT_ID
     path = Path(template_path).resolve()
     stack_dir = path.parent
+    if _ONBOARDING_MODE:
+        from src.local_setup import safe_path
+        from src.services.workspace import _manifest, _account
+        try:
+            path = safe_path(template_path)
+            stack_dir = path.parent
+            _manifest(stack_dir, f"{stack_dir.parent.name}/{stack_dir.name}")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            account = data.get("account_id")
+            if (path.name != f"{stack_dir.name}_template.json"
+                    or not isinstance(account, str)
+                    or (account and _account(account) != account)
+                    or not isinstance(data.get("campaigns"), list)):
+                raise ValueError
+        except Exception:
+            raise OnboardingError("This draft needs a local setup check before it can be opened safely.") from None
+        _STACK_JSON_PATH, _STACK_STATE_DIR, _ACCOUNT_ID = path, stack_dir, account
+        for key in _STACK_ENV_KEYS:
+            os.environ.pop(key, None)
+        return  # Start even before keys are entered; never load them from elsewhere.
 
     env_path = stack_dir / ".env"
-    if env_path.exists():
-        load_dotenv(env_path, override=True)
+    if _ACCESS_MODE != "operator":
+        # Distributed planning sessions must not borrow another stack's keys
+        # from Cursor's environment or a parent repository's dotenv file.
+        for key in _STACK_ENV_KEYS:
+            os.environ.pop(key, None)
+    if env_path.exists() and _ACCESS_MODE != "inspect":
+        load_dotenv(env_path, override=True, interpolate=False)
         logger.info("Loaded stack .env: %s", env_path)
 
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
+    if (_ACCESS_MODE != "operator" and os.environ.get("FB_ACCOUNT_ID")
+            not in (None, "", data["account_id"])):
+        raise ValueError("Local credential account does not match the selected stack template.")
     _STACK_JSON_PATH = path
     _STACK_STATE_DIR = stack_dir
     _ACCOUNT_ID = data["account_id"]
@@ -750,12 +926,27 @@ async def _main():
 
 
 def main():
+    import argparse
     import asyncio
 
-    if "--config" in sys.argv:
-        idx = sys.argv.index("--config")
-        if idx + 1 < len(sys.argv):
-            _load_stack_config(sys.argv[idx + 1])
+    global _ACCESS_MODE, _ONBOARDING_MODE
+    parser = argparse.ArgumentParser(description="Stack-scoped AdCode MCP server")
+    parser.add_argument("--config", help="Path to the authoritative local stack template")
+    parser.add_argument(
+        "--access-mode", choices=("inspect", "planning", "operator"), default="operator",
+        help="Distributed clients use planning; operator preserves legacy provider/write tools.",
+    )
+    parser.add_argument("--onboarding", action="store_true", help="Use the guided local draft and private settings refresh workflow.")
+    parser.add_argument("--skip-connection-check", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.onboarding and args.access_mode != "planning":
+        parser.error("Guided onboarding requires planning access mode.")
+    _ACCESS_MODE = args.access_mode
+    _ONBOARDING_MODE = args.onboarding
+    if args.config:
+        _load_stack_config(args.config)
+    elif args.access_mode != "operator":
+        parser.error("Restricted modes require --config with a local stack template.")
     else:
         logger.warning(
             "No --config provided. Credentials must be set in environment variables. "

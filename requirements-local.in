@@ -1,0 +1,9 @@
+# Local Operator distribution only; email intake and test tooling are not shipped.
+# Regenerate the universal Python 3.13 hash lock with the command in docs/local-operator.md.
+facebook-business>=19.0.0
+mcp>=1.26.0,<2
+openpyxl>=3.1.0
+jsonschema>=4.23.0
+python-dotenv>=1.0.0
+anthropic>=0.40.0
+markdown>=3.6

@@ -6,7 +6,7 @@ AdCode is a digital advertising governance layer for Meta Ads. It manages campai
 
 AdCode provides plan/apply workflows, stack-local state, drift detection, and MCP tools so agents can inspect, explain, and request changes through a deterministic execution layer instead of making ad platform changes directly.
 
-Git is the audit trail. Pull requests are the review mechanism. The JSON stack is the desired state, and AdCode makes Facebook match it exactly.
+The JSON stack is the desired state; the operator engine applies its managed changes to Facebook. Private Git history and pull requests can support review, but durable plan records, approval-to-plan binding, and a production audit system are not implemented.
 
 ## Why
 
@@ -15,11 +15,11 @@ Digital advertising operations still depend on spreadsheets, manual entry, scree
 AdCode applies infrastructure-as-code practices to paid media:
 
 - **Declarative stacks**: describe what should exist, not the sequence of clicks to create it.
-- **Plan before apply**: review creates, updates, and deletes before any API call.
+- **Plan before apply**: review creates, updates, and deletes before any live Meta mutation. Planning can call Anthropic.
 - **Stack-local state**: track Facebook IDs and last-pushed params like `terraform.tfstate`.
 - **Drift detection**: compare managed state to live Facebook data.
-- **Git-backed audit**: commit templates and state together for a durable history.
-- **AI-safe execution**: expose the engine through MCP while keeping changes deterministic and reviewable.
+- **Git-backed history**: optionally commit templates and state together in a private repository, never the public project.
+- **Restricted MCP execution**: generated local projects allow inspection/planning, not live Meta operations. This is not an OS or agent sandbox.
 
 ## Product Pillars
 
@@ -37,9 +37,27 @@ The product story is: give your company's AI agents a safe, governed way to oper
 
 See [ADR-018](docs/decisions/018-adcode-as-governance-layer.md), [ADR-019](docs/decisions/019-product-pillars.md), and [ADR-020](docs/decisions/020-mcp-connection-modes.md) for the design rationale.
 
+## Local macOS / Cursor POC
+
+The local POC lets an owner describe campaigns in plain language to Cursor, inspect the edited JSON, and review plans without giving the project MCP live Meta access. No hosted connection or code repository checkout on the recipient's Mac is required.
+
+1. Extract a trusted source ZIP and double-click `scripts/install_macos.command` as your normal user. The purpose-built bundle is `dist/AdCode-Local-POC.zip` with root `Install AdCode.command`. The unsigned download may require normal Finder/Privacy & Security approval; do not bypass Gatekeeper or quarantine.
+2. Restart Cursor. Ask global **AdCode-Setup → `create_workspace`** using a friendly `customer_name` and optional `workspace_name` (default `Campaigns`), not slugs, account IDs, or secrets. Its four tools are `create_workspace`, `list_workspaces`, `check_workspace`, and `open_workspace`.
+3. Use `open_workspace` with the returned known `workspace_id`, or open the returned folder yourself under **`~/AdCode Workspaces`** (not Documents). It contains an unfinished draft (`account_id: ""`, `campaigns: []`), a blank private `.env`, `.env.example`, guided metadata, project MCP configuration and rules/ignore files; no fake provider IDs or state are created.
+4. **Edit `.env` yourself privately**: enter `FB_ACCOUNT_ID`, Meta app ID/secret/token, Anthropic key, a required budget cap in **whole currency units, not cents**, and an uppercase supported ISO currency code. Never let an agent read the file. `Configure AdCode.command` is an optional local helper supporting unbound guided drafts as well as bound workspaces, not the primary setup path; it saves settings without permitting account retargeting. Ask `check_workspace` to check local settings; after valid settings it binds the untouched empty draft's account without contacting providers. Generated `--access-mode planning --onboarding` projects refresh settings on subsequent stack-tool calls without a restart.
+5. Tell Cursor what you are promoting, your budget, and your dates. Ask it to edit local JSON, keep new campaigns `PAUSED`, inspect it, then request a plan/review packet. Campaign data can be processed by Cursor's providers and Anthropic and may incur costs. Never put runtime credentials in chat, MCP JSON, installer inputs, or telemetry. Keep Cursor permissions and approval prompts enabled; setup never bypasses them or authorizes spending.
+
+Prepared files, recognized connection configuration, and a requested Cursor launch are **not** proof of an active MCP or authenticated provider connection. Local `ready`/entered-settings statuses do not verify provider access.
+
+The user-local installation lives in `~/Library/Application Support/AdCode`, using uv 0.13.7 (downloaded archives SHA-256 verified), managed Python 3.13, and the universal hash-locked `requirements-local.lock`. The runtime is allowlisted, not a repository/private-data copy. Updates preserve releases and roll back the active pointer on Cursor registration failure; existing projects stay pinned to their original release and virtualenv. There is no automatic migration or old-release cleanup. Older workspaces without guided metadata return `upgrade_required` from the local check and remain unchanged.
+
+Generated projects explicitly use `--access-mode planning`; enabling legacy operator tools requires a deliberate configuration change, never automatic installer escalation. The POC has no durable approval binding, production audit guarantee, or platform sandbox. A Meta account may not be a sandbox. This is not a signed/notarized DMG and includes no payment/licensing, update service, or Meta OAuth flow.
+
+**Validation:** full Windows `python -m pytest -q`: **563 passed, 25 skipped**. Clean Linux Python **3.13.18**, fresh hash-locked bundle runtime, nine selected local/MCP files including guided access and real guided stdio: **249 passed, no skips**, with no provider calls. Rebuild and verify archive integrity, public-file allowlist, permissions, and checksum after documentation changes. Actual macOS hardware is unavailable; installation, Cursor UI and approval behavior remain unverified. Earlier results are historical and recorded separately. See the [validation record](docs/local-poc-validation.md). See the [local operator runbook](docs/local-operator.md), [security boundaries](SECURITY.md), and [ADR-024](docs/decisions/024-local-macos-cursor-poc.md).
+
 ## Deployment Options
 
-AdCode has two intended deployment modes:
+Local operation is implemented; organizational hosting is a design direction, not a production-ready feature of this POC:
 
 | Mode | Use case | Connection model |
 | --- | --- | --- |
@@ -90,9 +108,11 @@ customers/
 
 Starting the server with `--config customers/acme/q1_brand/q1_brand_template.json` loads credentials from `customers/acme/q1_brand/.env`, reads `account_id` from the template, and scopes every stack tool to that folder.
 
-## Quickstart
+## Developer / Legacy Operator Quickstart
 
-For a step-by-step walkthrough, see [docs/getting-started.md](docs/getting-started.md).
+For the restricted macOS/Cursor POC, use the [local operator runbook](docs/local-operator.md) instead. The commands below are the deliberate developer/operator path: **without `--access-mode`, the server retains all nine legacy tools, including live writes**. They do not describe the generated planning-only workspace.
+
+For the older operator walkthrough, see [docs/getting-started.md](docs/getting-started.md).
 
 ### 1. Install
 
@@ -131,10 +151,12 @@ Required values:
 
 Optional values:
 
-- `ACCOUNT_BUDGET_CAP` — total declared spend cap in whole dollars. When set, `plan_stack` shows whether the stack exceeds the cap and `apply_stack` is blocked if it does.
+- `ACCOUNT_BUDGET_CAP` — total declared spend cap in whole currency units, not cents. When set, `plan_stack` shows whether the stack exceeds the cap and `apply_stack` is blocked if it does. This is not a Meta billing limit.
 - `CURRENCY` — ISO 4217 currency code for display (default: `USD`).
 
-The Facebook account ID lives in the stack template as `account_id`; it does not need to be duplicated in `.env`.
+These are optional only in the legacy workflow; guided local POC settings checks require both.
+
+In this legacy workflow, the Facebook account ID lives in the stack template as `account_id` and does not need to be duplicated in `.env`. Guided onboarding instead requires private `FB_ACCOUNT_ID` entry in `.env` so the local check can bind the empty draft.
 
 ### 3. Start the MCP server
 
@@ -182,7 +204,17 @@ After apply, AdCode records Facebook-assigned IDs in `state.json` and writes new
 
 ## MCP Tools
 
-The MCP surface is intentionally small — a Terraform-like set of stack lifecycle verbs. See [ADR-022](docs/decisions/022-minimal-mcp-tool-surface.md) and [docs/stack-authoring.md](docs/stack-authoring.md) for the design rationale.
+The MCP surface is intentionally small — a Terraform-like set of stack lifecycle verbs.
+
+| Project access mode | Available tools |
+| --- | --- |
+| `--access-mode inspect` | `show_stack`, `show_state` only |
+| `--access-mode planning` (generated local POC default) | Inspect tools plus `plan_stack`, `document_stack`; no MCP file writes, live Meta access, or Excel tool |
+| `--access-mode operator` or no flag (legacy compatibility) | All nine tools in the table below |
+
+Restrictions apply at both discovery and dispatch, including guessed hidden-tool calls. Restricted modes clear inherited provider/settings environment values; planning loads the fixed stack's `.env` without interpolation. Account binding mismatches fail closed. These controls do not restrict Cursor's independent terminal/file tools.
+
+The following loop and full tool table describe **operator mode**, not the generated planning-only POC. See [ADR-022](docs/decisions/022-minimal-mcp-tool-surface.md) and [docs/stack-authoring.md](docs/stack-authoring.md) for the design rationale.
 
 The normal operator loop is:
 
@@ -332,7 +364,9 @@ Integration tests are skipped automatically when credentials are absent.
 
 ## Manual CLI Smoke Tests
 
-Plan without calling Facebook:
+These developer/operator CLI commands are outside the generated project's MCP access-mode boundary; apply can affect a real account. Do not run them as a workaround for planning-mode restrictions.
+
+Plan without calling Facebook (AI review may still call Anthropic):
 
 ```bash
 python src/traffic.py customers/<slug>/<stack-name>/<stack-name>_template.json --dry-run

@@ -22,10 +22,13 @@
     "campaign": {
       "type": "object",
       "required": ["name", "objective", "status", "special_ad_categories", "ad_sets"],
+      "if": { "properties": { "status": { "const": "ARCHIVED" } } },
+      "then": { "required": ["fb_id"] },
       "additionalProperties": false,
       "properties": {
         "fb_id": {
           "type": "string",
+          "minLength": 1,
           "description": "Facebook campaign ID for stable correlation. Optional for new campaigns."
         },
         "name": { "type": "string", "minLength": 1 },
@@ -56,7 +59,7 @@
         },
         "status": {
           "type": "string",
-          "enum": ["ACTIVE", "PAUSED"]
+          "enum": ["ACTIVE", "PAUSED", "ARCHIVED"]
         },
         "special_ad_categories": {
           "type": "array",
@@ -85,16 +88,19 @@
     "ad_set": {
       "type": "object",
       "required": ["name", "status", "targeting", "billing_event", "optimization_goal", "ads"],
+      "if": { "properties": { "status": { "const": "ARCHIVED" } } },
+      "then": { "required": ["fb_id"] },
       "additionalProperties": false,
       "properties": {
         "fb_id": {
           "type": "string",
+          "minLength": 1,
           "description": "Facebook ad set ID for stable correlation. Optional for new ad sets."
         },
         "name": { "type": "string", "minLength": 1 },
         "status": {
           "type": "string",
-          "enum": ["ACTIVE", "PAUSED"]
+          "enum": ["ACTIVE", "PAUSED", "ARCHIVED"]
         },
         "targeting": { "$ref": "#/definitions/targeting" },
         "billing_event": {
@@ -238,17 +244,28 @@
     },
     "ad": {
       "type": "object",
-      "required": ["name", "status", "creative"],
+      "required": ["name", "status"],
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ARCHIVED" } } },
+          "then": { "required": ["fb_id"] }
+        },
+        {
+          "if": { "not": { "required": ["fb_id"] } },
+          "then": { "required": ["creative"] }
+        }
+      ],
       "additionalProperties": false,
       "properties": {
         "fb_id": {
           "type": "string",
+          "minLength": 1,
           "description": "Facebook ad ID for stable correlation. Optional for new ads."
         },
         "name": { "type": "string", "minLength": 1 },
         "status": {
           "type": "string",
-          "enum": ["ACTIVE", "PAUSED"]
+          "enum": ["ACTIVE", "PAUSED", "ARCHIVED"]
         },
         "creative": { "$ref": "#/definitions/creative" }
       }
